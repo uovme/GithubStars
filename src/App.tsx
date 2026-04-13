@@ -7,8 +7,6 @@ import { CategorySidebar } from './components/CategorySidebar';
 import { ReleaseTimeline } from './components/ReleaseTimeline';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useAppStore } from './store/useAppStore';
-import { useAutoUpdateCheck } from './components/UpdateChecker';
-import { UpdateNotificationBanner } from './components/UpdateNotificationBanner';
 import { backend } from './services/backendAdapter';
 import { syncFromBackend, startAutoSync, stopAutoSync } from './services/autoSync';
 
@@ -24,7 +22,7 @@ function App() {
   } = useAppStore();
 
   // 自动检查更新
-  useAutoUpdateCheck();
+  // useAutoUpdateCheck(); // Disabled: not needed for self-hosted deployment
 
   // Apply theme to document
   useEffect(() => {
@@ -100,7 +98,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <UpdateNotificationBanner />
+
       <Header />
       <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
         {renderCurrentView()}
