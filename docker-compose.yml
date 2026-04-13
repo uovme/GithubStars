@@ -1,24 +1,14 @@
-version: '3.8'
-
 services:
-  frontend:
+  app:
     build: .
     ports:
-      - "8080:80"
-    depends_on:
-      - backend
-    restart: unless-stopped
-
-  backend:
-    build: ./server
-    expose:
-      - "3000"
+      - "8080:3000"
     environment:
       - API_SECRET=${API_SECRET:-}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
     volumes:
-      - backend-data:/app/data
+      - app-data:/app/data
     restart: unless-stopped
 
 volumes:
-  backend-data:
+  app-data:

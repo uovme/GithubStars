@@ -69,11 +69,14 @@ https://github.com/AmintaCCCP/GithubStarsManager/releases
 2. Navigate to the directory, and open a Terminal window at the downloaded folder.
 3. Run `npm install` to install dependencies and `npm run dev` to build
 
-> 💡 When running the project locally using `npm run dev`, calls to AI services and WebDAV may fail due to CORS restrictions. To avoid this issue, use the prebuilt client application or build the client yourself. Alternatively, run the backend server (`cd server && npm run dev`) to proxy API calls and avoid CORS entirely.
-
 ### 🐳 Run With Docker
 
-You can also run this application using Docker. See [DOCKER.md](DOCKER.md) for detailed instructions on how to build and deploy using Docker. The Docker setup handles CORS properly and allows you to configure any AI or WebDAV service URLs directly in the application.
+The application uses a single-container architecture — Express serves both API and frontend. See [DOCKER.md](DOCKER.md) for full details.
+
+```bash
+docker compose up -d --build
+# Visit http://localhost:8080
+```
 
 ### 🖥️ Backend Server (Optional)
 
@@ -81,12 +84,6 @@ The app works fully without a backend (pure frontend, localStorage). An optional
 - **Cross-device sync**: Share data between browsers/devices
 - **CORS-free proxying**: AI and WebDAV calls go through the server, avoiding browser CORS issues
 - **Token security**: API keys stored encrypted on server, never exposed to browser network tab
-
-#### Quick Start (Docker — recommended)
-```bash
-docker-compose up --build
-```
-Frontend on port 8080, backend on port 3000. Data persisted in a Docker volume.
 
 #### Manual Setup
 ```bash
@@ -100,7 +97,6 @@ npm run dev
 |----------|----------|-------------|
 | `API_SECRET` | No | Bearer token for API authentication. If unset, auth is disabled. |
 | `ENCRYPTION_KEY` | No | AES-256 key for encrypting stored secrets. Auto-generated if unset. |
-| `PORT` | No | Server port (default: 3000) |
 
 #### Connecting Frontend to Backend
 1. Open Settings panel in the app
@@ -133,15 +129,20 @@ Steps: open Settings, add a WebDAV config, enter the server URL, username, passw
 
 ## 🚀 Deployment
 
-The build output is a static site, so it deploys anywhere static hosting is supported:
+### Docker (Recommended)
+```bash
+docker compose up -d --build
+```
+For reverse proxy (1Panel, Nginx, Caddy), point your domain to `http://127.0.0.1:8080`.
+
+### Static Hosting (Frontend Only)
+The frontend build output is a static site that can be deployed anywhere:
 
 - **Netlify**: connect your fork, set build command `npm run build`, publish directory `dist`
 - **Vercel**: same as Netlify — import repo, build runs automatically
 - **GitHub Pages**: push the `dist` folder to a `gh-pages` branch
 - **Cloudflare Pages**: connect repo, build command `npm run build`, output `dist`
 - **Self-hosted**: serve the `dist` folder with any HTTP server (nginx, Caddy, etc.)
-
-For Docker deployment see the [Backend Server](#️-backend-server-optional) section above.
 
 ## Who it's for
 

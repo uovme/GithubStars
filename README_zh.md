@@ -153,7 +153,13 @@ npm run build
 - 自建服务器
 
 ### Docker 部署
-您也可以使用 Docker 来运行此应用程序。请参阅 [DOCKER.md](DOCKER.md) 获取详细的构建和部署说明。Docker 设置正确处理了 CORS，并允许您直接在应用程序中配置任何 AI 或 WebDAV 服务 URL。
+
+应用采用单容器架构 — Express 同时提供 API 和前端页面。详细说明请参阅 [DOCKER.md](DOCKER.md)。
+
+```bash
+docker compose up -d --build
+# 访问 http://localhost:8080
+```
 
 ### 🖥️ 后端服务器（可选）
 
@@ -165,9 +171,9 @@ npm run build
 
 #### 快速启动（推荐使用 Docker）
 ```bash
-docker-compose up --build
+docker compose up -d --build
 ```
-前端运行在 8080 端口，后端运行在 3000 端口。数据持久化存储在 Docker 卷中。
+单容器运行在 8080 端口。数据持久化存储在 Docker 卷中。
 
 #### 手动启动
 ```bash
@@ -181,7 +187,6 @@ npm run dev
 |----------|----------|-------------|
 | `API_SECRET` | 否 | API 认证令牌。未设置时禁用认证。 |
 | `ENCRYPTION_KEY` | 否 | 用于加密存储密钥的 AES-256 密钥。未设置时自动生成。 |
-| `PORT` | 否 | 服务器端口（默认：3000） |
 
 #### 前端连接后端
 1. 打开应用中的设置面板

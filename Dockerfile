@@ -1,34 +1,39 @@
-# Build stage
-FROM node:18-alpine AS build
+# ===== Stage 1: Build frontend =====
+FROM node:22-alpine AS frontend-build
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# ===== Stage 2: Build backend =====
+FROM node:22-alpine AS backend-build
+
+WORKDIR /app/server
+COPY server/package*.json ./
+RUN npm ci
+COPY server/ .
+RUN npm run build && npm prune --omit=dev
+
+# ===== Stage 3: Production =====
+FROM node:22-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Copy backend build output and production dependencies
+COPY --from=backend-build /app/server/dist ./dist
+COPY --from=backend-build /app/server/node_modules ./node_modules
+COPY --from=backend-build /app/server/package.json ./
 
-# Install dependencies
-RUN npm ci
+# Copy frontend build output into public directory (served by Express)
+COPY --from=frontend-build /app/dist ./public
 
-# Copy source code
-COPY . .
+# Create data directory for SQLite
+RUN mkdir -p data && chown -R node:node /app
 
-# Build the application
-RUN npm run build
+USER node
+VOLUME /app/data
+EXPOSE 3000
 
-# Production stage
-FROM nginx:alpine
-
-# Remove default nginx config that conflicts with ours
-RUN rm -f /etc/nginx/conf.d/default.conf
-
-# Copy built files from build stage
-COPY --from=build /app/dist /usr/share/nginx/html
-
-# Copy custom nginx configuration
-COPY nginx.conf /etc/nginx/nginx.conf
-
-# Expose port
-EXPOSE 80
-
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "dist/index.js"]

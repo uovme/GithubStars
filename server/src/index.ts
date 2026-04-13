@@ -2,6 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import compression from 'compression';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { authMiddleware } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -19,8 +23,9 @@ export function createApp(): express.Express {
   const app = express();
 
   // Middleware
-  app.use(helmet());
+  app.use(helmet({ contentSecurityPolicy: false }));
   app.use(cors());
+  app.use(compression());
   app.use(morgan('combined'));
   app.use(express.json({ limit: '50mb' }));
 
@@ -40,8 +45,25 @@ export function createApp(): express.Express {
   // Wave 3: Proxy routes
   app.use(proxyRouter);
 
-  // Global error handler
-  app.use(errorHandler);
+  // Global error handler (for API routes)
+  app.use('/api', errorHandler);
+
+  // --- Serve frontend static files (production) ---
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const publicDir = path.resolve(__dirname, '../public');
+
+  if (fs.existsSync(publicDir)) {
+    app.use(express.static(publicDir));
+
+    // SPA fallback: all non-API GET requests return index.html
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(publicDir, 'index.html'));
+    });
+    console.log(`📁 Serving frontend from ${publicDir}`);
+  } else {
+    console.log('ℹ️  No public directory found — running API-only mode');
+  }
 
   return app;
 }
