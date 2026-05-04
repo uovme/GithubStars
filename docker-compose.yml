@@ -2,7 +2,7 @@ services:
   app:
     build: .
     ports:
-      - "8080:3000"
+      - "127.0.0.1:8086:3000"
     environment:
       - API_SECRET=${API_SECRET:-}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
