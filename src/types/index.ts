@@ -5,30 +5,31 @@ export interface Repository {
   description: string | null;
   html_url: string;
   stargazers_count: number;
+  forks_count: number;
+  forks: number;
   language: string | null;
   created_at: string;
   updated_at: string;
   pushed_at: string;
-  starred_at?: string; // 新增：加入星标的时间
+  starred_at?: string;
   owner: {
     login: string;
     avatar_url: string;
   };
   topics: string[];
-  // AI generated fields
   ai_summary?: string;
   ai_tags?: string[];
-  ai_platforms?: string[]; // 新增：支持的平台类型
+  ai_platforms?: string[];
   analyzed_at?: string;
-  analysis_failed?: boolean; // 新增：AI分析是否失败
-  // Release subscription
+  analysis_failed?: boolean;
   subscribed_to_releases?: boolean;
-  // Manual editing fields
   custom_description?: string;
   custom_tags?: string[];
   custom_category?: string;
-  category_locked?: boolean; // 是否锁定分类（锁定后同步不自动改分类）
+  category_locked?: boolean;
   last_edited?: string;
+  last_release_fetch_time?: string;  // ISO timestamp, for incremental sync
+  has_fetched_releases?: boolean;   // whether this repo has been synced for releases
 }
 
 export interface ReleaseAsset {
@@ -45,18 +46,76 @@ export interface ReleaseAsset {
 export interface Release {
   id: number;
   tag_name: string;
-  name: string;
-  body: string;
+  name: string | null;
+  body: string | null;
   published_at: string;
   html_url: string;
   assets: ReleaseAsset[];
+  zipball_url?: string;
+  tarball_url?: string;
+  prerelease?: boolean;
   repository: {
     id: number;
     full_name: string;
     name: string;
   };
-  // Read status
   is_read?: boolean;
+}
+
+// Fork types
+export interface ForkRepo {
+  id: number;
+  name: string;
+  fork: boolean;
+  full_name: string;
+  description: string | null;
+  html_url: string;
+  stargazers_count: number;
+  forks_count: number;
+  forks: number;
+  language: string | null;
+  created_at: string;
+  updated_at: string;
+  pushed_at: string;
+  default_branch: string;
+  owner: {
+    login: string;
+    avatar_url: string;
+  };
+  source: {
+    id: number;
+    full_name: string;
+    name: string;
+    description: string | null;
+    html_url: string;
+    stargazers_count: number;
+    forks_count: number;
+    updated_at: string;
+    owner: {
+      login: string;
+      avatar_url: string;
+    };
+  };
+  parent?: {
+    id: number;
+    full_name: string;
+    name: string;
+    html_url: string;
+  };
+  has_unread?: boolean;
+  upstream_updated_at?: string; // last time we checked/fetched upstream updates
+}
+
+export interface WorkflowDefinition {
+  id: number;
+  name: string;
+  path: string; // workflow file path, e.g. ".github/workflows/ci.yml"
+  state: string; // "active" | "disabled" | "warning"
+  created_at: string;
+  updated_at: string;
+  url: string;
+  html_url: string;
+  badge_url: string;
 }
 
 export interface GitHubUser {
@@ -67,7 +126,7 @@ export interface GitHubUser {
   email: string | null;
 }
 
-export type AIApiType = 'openai' | 'openai-responses' | 'claude' | 'gemini';
+export type AIApiType = 'openai' | 'openai-responses' | 'claude' | 'gemini' | 'openai-compatible';
 export type AIReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export type SecretStatus = 'ok' | 'empty' | 'decrypt_failed';
@@ -109,6 +168,9 @@ export interface SearchFilters {
   maxStars?: number;
   isAnalyzed?: boolean; // 新增：是否已AI分析
   isSubscribed?: boolean; // 新增：是否订阅Release
+  isEdited?: boolean; // 新增：是否已编辑
+  isCategoryLocked?: boolean; // 新增：分类是否已锁定
+  analysisFailed?: boolean; // 新增：分析是否失败
 }
 
 export interface Category {
@@ -124,6 +186,8 @@ export interface AssetFilter {
   id: string;
   name: string;
   keywords: string[];
+  isPreset?: boolean;
+  icon?: string;
 }
 
 export interface AppState {
@@ -136,6 +200,7 @@ export interface AppState {
   repositories: Repository[];
   isLoading: boolean;
   lastSync: string | null;
+  analyzingRepositoryIds: Set<number>;
   
   // AI
   aiConfigs: AIConfig[];
@@ -158,15 +223,20 @@ export interface AppState {
   // Categories
   customCategories: Category[]; // 新增：自定义分类
   hiddenDefaultCategoryIds: string[];
+  defaultCategoryOverrides: Record<string, Partial<Category>>;
+  categoryOrder: string[]; // 新增：分类排序顺序
+  collapsedSidebarCategoryCount: number; // 新增：折叠状态下显示的分类个数
   
   // Asset Filters
   assetFilters: AssetFilter[]; // 新增：资源过滤器
   
   // UI
   theme: 'light' | 'dark';
-  currentView: 'repositories' | 'releases' | 'settings';
+  currentView: 'repositories' | 'releases' | 'forks' | 'settings' | 'subscription';
   selectedCategory: string;
   language: 'zh' | 'en';
+  isSidebarCollapsed: boolean;
+  readmeModalOpen: boolean;
   
   // Update
   updateNotification: UpdateNotification | null;
@@ -176,6 +246,51 @@ export interface AppState {
 
   // Backend
   backendApiSecret: string | null;
+
+  // Fork Timeline View
+  forks: ForkRepo[];
+  readForks: Set<number>;
+
+  // Fork Timeline View State
+  forkViewMode: 'timeline' | 'repository';
+  forkSelectedFilters: string[];
+  forkSearchQuery: string;
+  forkExpandedRepositories: Set<number>;
+  forkIsRefreshing: boolean;
+
+  // Release Timeline View
+  releaseViewMode: 'timeline' | 'repository';
+  releaseSelectedFilters: string[];
+  releaseSearchQuery: string;
+  releaseExpandedRepositories: Set<number>;
+  releaseIsRefreshing: boolean;
+  includePreRelease: boolean;  // whether to include pre-release in refresh
+
+  // Discovery
+  discoveryChannels: DiscoveryChannel[];
+  discoveryRepos: Record<DiscoveryChannelId, DiscoveryRepo[]>;
+  discoveryLastRefresh: Record<DiscoveryChannelId, string | null>;
+  discoveryIsLoading: Record<DiscoveryChannelId, boolean>;
+  discoveryIsLoadingMore: Record<DiscoveryChannelId, boolean>;
+  discoveryLoadMoreError: Record<DiscoveryChannelId, string | null>;
+  selectedDiscoveryChannel: DiscoveryChannelId;
+  discoveryPlatform: DiscoveryPlatform;
+  discoveryLanguage: ProgrammingLanguage;
+  discoverySortBy: SortBy;
+  discoverySortOrder: SortOrder;
+  discoverySearchQuery: string;
+  discoverySelectedTopic: TopicCategory | null;
+  discoveryHasMore: Record<DiscoveryChannelId, boolean>;
+  discoveryNextPage: Record<DiscoveryChannelId, number>;
+  discoveryTotalCount: Record<DiscoveryChannelId, number>;
+  discoveryScrollPositions: Record<DiscoveryChannelId, number>;
+  trendingTimeRange: TrendingTimeRange;
+
+  // Subscription
+  subscriptionRepos: Record<string, SubscriptionRepo[]>;
+  subscriptionLastRefresh: Record<string, string | null>;
+  subscriptionIsLoading: Record<string, boolean>;
+  subscriptionChannels: SubscriptionChannel[];
 }
 
 export interface UpdateNotification {
@@ -190,3 +305,153 @@ export interface AnalysisProgress {
   current: number;
   total: number;
 }
+
+export type DiscoveryPlatform = 'All' | 'Android' | 'Macos' | 'Windows' | 'Linux';
+
+export type ProgrammingLanguage = 
+  | 'All' 
+  | 'Kotlin' 
+  | 'Java' 
+  | 'JavaScript' 
+  | 'TypeScript' 
+  | 'Python' 
+  | 'Swift' 
+  | 'Rust' 
+  | 'Go' 
+  | 'CSharp' 
+  | 'CPlusPlus' 
+  | 'C' 
+  | 'Dart' 
+  | 'Ruby' 
+  | 'PHP';
+
+export type SortBy = 'BestMatch' | 'MostStars' | 'MostForks';
+
+export type SortOrder = 'Descending' | 'Ascending';
+
+export type DiscoveryChannelId = 'trending' | 'hot-release' | 'most-popular' | 'topic' | 'search';
+
+export type DiscoveryChannelIcon = 'trending' | 'rocket' | 'star' | 'tag' | 'search';
+
+export interface DiscoveryChannel {
+  id: DiscoveryChannelId;
+  name: string;
+  nameEn: string;
+  icon: DiscoveryChannelIcon;
+  description: string;
+  enabled: boolean;
+}
+
+export interface PaginatedDiscoveryRepositories {
+  repos: DiscoveryRepo[];
+  hasMore: boolean;
+  nextPageIndex: number;
+  totalCount?: number;
+}
+
+export interface DiscoveryRepo extends Repository {
+  rank: number;
+  channel: DiscoveryChannelId;
+  platform: DiscoveryPlatform;
+}
+
+export type TrendingTimeRange = 'daily' | 'weekly' | 'monthly';
+
+export type TopicCategory = 
+  | 'ai' 
+  | 'ml' 
+  | 'database' 
+  | 'web' 
+  | 'mobile' 
+  | 'devtools' 
+  | 'security' 
+  | 'game';
+
+export interface TopicInfo {
+  id: TopicCategory;
+  name: string;
+  nameEn: string;
+  keywords: string;
+}
+
+// Subscription related types
+export interface SubscriptionRepo extends Repository {
+  rank: number;
+  channel: 'most-stars' | 'most-forks' | 'most-dev' | 'trending';
+}
+
+export interface SubscriptionDev {
+  rank: number;
+  login: string;
+  avatar_url: string;
+  html_url: string;
+  name: string | null;
+  bio: string | null;
+  public_repos: number;
+  followers: number;
+  topRepo: SubscriptionRepo | null;
+}
+
+// GitHub API response types
+export interface GitHubSearchUserResponse {
+  items: Array<{
+    login: string;
+    avatar_url: string;
+    html_url: string;
+  }>;
+}
+
+export interface GitHubUserDetail {
+  login: string;
+  avatar_url: string;
+  html_url: string;
+  name: string | null;
+  bio: string | null;
+  public_repos: number;
+  followers: number;
+}
+
+// Subscription channel types
+export interface SubscriptionChannel {
+  id: string;
+  name: string;
+  nameEn: string;
+  icon: string;
+  description: string;
+  enabled: boolean;
+}
+
+export const defaultSubscriptionChannels: SubscriptionChannel[] = [
+  {
+    id: 'most-stars',
+    name: '最多星标',
+    nameEn: 'Most Stars',
+    icon: '⭐',
+    description: 'GitHub 上星标数最多的项目 Top 10',
+    enabled: true,
+  },
+  {
+    id: 'most-forks',
+    name: '最多复刻',
+    nameEn: 'Most Forks',
+    icon: '🍴',
+    description: 'GitHub 上复刻数最多的项目 Top 10',
+    enabled: true,
+  },
+  {
+    id: 'most-dev',
+    name: '热门开发者',
+    nameEn: 'Top Developers',
+    icon: '👤',
+    description: 'GitHub 上最受关注的开发者 Top 10',
+    enabled: true,
+  },
+  {
+    id: 'trending',
+    name: '热门趋势',
+    nameEn: 'Trending',
+    icon: '🔥',
+    description: 'GitHub 上近期最受关注的项目 Top 10',
+    enabled: true,
+  },
+];

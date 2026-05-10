@@ -1,5 +1,61 @@
 import { Repository, AIConfig, AIApiType } from '../types';
 import { backend } from './backendAdapter';
+import { buildApiUrl, buildFinalApiUrl } from '../utils/apiUrlBuilder';
+
+interface OpenAIResponseContentPart {
+  text?: string;
+}
+
+interface OpenAIResponseOutputItem {
+  content?: OpenAIResponseContentPart[];
+}
+
+interface OpenAIResponseMessage {
+  content?: string;
+  reasoning_content?: string;
+}
+
+interface OpenAIResponseChoice {
+  message?: OpenAIResponseMessage;
+}
+
+interface OpenAIResponse {
+  output_text?: string;
+  output?: OpenAIResponseOutputItem[];
+  choices?: OpenAIResponseChoice[];
+}
+
+export interface ConnectionTestResult {
+  success: boolean;
+  statusCode?: number;
+  statusText?: string;
+  errorType?: 'network' | 'auth' | 'timeout' | 'server' | 'unknown';
+  message: string;
+}
+
+function getStatusCodeMeaning(statusCode: number, language: string): string {
+  const meanings: Record<number, { zh: string; en: string }> = {
+    400: { zh: '请求参数错误', en: 'Bad Request' },
+    401: { zh: 'API密钥无效或已过期', en: 'Invalid or expired API key' },
+    403: { zh: '没有权限访问该资源', en: 'Forbidden - no permission' },
+    404: { zh: 'API端点或模型不存在', en: 'API endpoint or model not found' },
+    408: { zh: '请求超时', en: 'Request timeout' },
+    429: { zh: '请求过于频繁，已达到速率限制', en: 'Rate limit exceeded' },
+    500: { zh: '服务器内部错误', en: 'Internal server error' },
+    502: { zh: '网关错误，服务器暂时不可用', en: 'Bad Gateway' },
+    503: { zh: '服务暂时不可用，请稍后重试', en: 'Service unavailable' },
+    504: { zh: '网关超时', en: 'Gateway timeout' },
+  };
+  return meanings[statusCode]?.[language as 'zh' | 'en'] || (language === 'zh' ? '未知错误' : 'Unknown error');
+}
+
+function getErrorTypeFromStatus(statusCode: number): ConnectionTestResult['errorType'] {
+  if (statusCode === 401 || statusCode === 403) return 'auth';
+  if (statusCode === 408 || statusCode === 504) return 'timeout';
+  if (statusCode >= 500) return 'server';
+  if (statusCode >= 400) return 'unknown';
+  return 'unknown';
+}
 
 export class AIService {
   private config: AIConfig;
@@ -15,41 +71,12 @@ export class AIService {
   }
 
   private getOpenAIReasoningPayload(): { effort: 'none' | 'low' | 'medium' | 'high' | 'xhigh' } | undefined {
-    const effort = this.config.reasoningEffort === 'minimal'
-      ? 'low'
-      : this.config.reasoningEffort;
+    const effort = this.config.reasoningEffort;
     return effort ? { effort } : undefined;
   }
 
   private isDeepSeekReasonerModel(): boolean {
     return this.getApiType() === 'openai' && this.config.model.trim() === 'deepseek-reasoner';
-  }
-
-  private buildApiUrl(pathWithVersion: string): string {
-    const baseUrlWithSlash = this.config.baseUrl.endsWith('/')
-      ? this.config.baseUrl
-      : `${this.config.baseUrl}/`;
-
-    const versionPrefix = pathWithVersion.split('/')[0] || '';
-
-    try {
-      const base = new URL(baseUrlWithSlash);
-      const basePath = base.pathname.replace(/\/$/, '');
-
-      // 兼容用户把 baseUrl 写成 .../v1 或 .../v1beta 的情况，避免拼成 /v1/v1/...
-      if (versionPrefix) {
-        const versionRe = new RegExp(`/${versionPrefix}$`);
-        if (versionRe.test(basePath) && pathWithVersion.startsWith(`${versionPrefix}/`)) {
-          const rest = pathWithVersion.slice(versionPrefix.length + 1); // remove "v1/"
-          return new URL(rest, baseUrlWithSlash).toString();
-        }
-      }
-
-      return new URL(pathWithVersion, baseUrlWithSlash).toString();
-    } catch {
-      // baseUrl 非绝对 URL 时这里会抛错；上层会在 testConnection/调用处处理失败
-      return `${baseUrlWithSlash}${pathWithVersion}`;
-    }
   }
 
   private async requestText(options: {
@@ -62,7 +89,7 @@ export class AIService {
     const apiType = this.getApiType();
     const reasoning = this.getOpenAIReasoningPayload();
 
-    if (apiType === 'openai' || apiType === 'openai-responses') {
+    if (apiType === 'openai' || apiType === 'openai-responses' || apiType === 'openai-compatible') {
       const messages = [
         ...(options.system.trim()
           ? [{ role: 'system', content: options.system }]
@@ -84,14 +111,14 @@ export class AIService {
             messages,
             max_tokens: options.maxTokens,
             ...(!isDeepSeekReasoner ? { temperature: options.temperature } : {}),
-            ...(!isDeepSeekReasoner && reasoning ? { reasoning } : {}),
+            ...(!isDeepSeekReasoner && reasoning && apiType !== 'openai-compatible' ? { reasoning } : {}),
           };
 
-      let data: any;
+      let data: Record<string, unknown>;
       if (backend.isAvailable && this.config.id) {
-        data = await backend.proxyAIRequest(this.config.id, requestBody);
+        data = await backend.proxyAIRequest(this.config.id, requestBody) as Record<string, unknown>;
       } else {
-        const url = this.buildApiUrl(apiType === 'openai-responses' ? 'v1/responses' : 'v1/chat/completions');
+        const url = buildFinalApiUrl(this.config.baseUrl, apiType);
         const response = await fetch(url, {
           method: 'POST',
           headers: {
@@ -109,25 +136,26 @@ export class AIService {
       }
 
       if (apiType === 'openai-responses') {
-        const outputText = typeof data?.output_text === 'string' ? data.output_text : '';
+        const typedData = data as OpenAIResponse;
+        const outputText = typedData.output_text;
         if (outputText) return outputText;
 
-        const output = data?.output;
+        const output = typedData.output;
         if (Array.isArray(output)) {
           const text = output
-            .flatMap((item: any) => Array.isArray(item?.content) ? item.content : [])
-            .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+            .flatMap((item) => Array.isArray(item?.content) ? item.content : [])
+            .map((part) => part?.text || '')
             .join('');
           if (text) return text;
         }
       } else {
-        const message = data?.choices?.[0]?.message;
-        const content = typeof message?.content === 'string' ? message.content : '';
+        const typedData = data as { choices?: OpenAIResponseChoice[] };
+        const choices = typedData.choices;
+        const message = choices?.[0]?.message;
+        const content = message?.content;
         if (content) return content;
 
-        const reasoningContent = typeof message?.reasoning_content === 'string'
-          ? message.reasoning_content
-          : '';
+        const reasoningContent = message?.reasoning_content;
         if (reasoningContent) return reasoningContent;
       }
 
@@ -147,7 +175,7 @@ export class AIService {
       if (backend.isAvailable && this.config.id) {
         data = await backend.proxyAIRequest(this.config.id, requestBody);
       } else {
-        const url = this.buildApiUrl('v1/messages');
+        const url = buildApiUrl(this.config.baseUrl, 'v1/messages');
         const response = await fetch(url, {
           method: 'POST',
           headers: {
@@ -203,7 +231,7 @@ ${options.user}` : options.user;
       data = await backend.proxyAIRequest(this.config.id, requestBody);
     } else {
       const path = `v1beta/models/${encodeURIComponent(model)}:generateContent`;
-      const urlObj = new URL(this.buildApiUrl(path));
+      const urlObj = new URL(buildApiUrl(this.config.baseUrl, path));
       urlObj.searchParams.set('key', this.config.apiKey);
       const response = await fetch(urlObj.toString(), {
         method: 'POST',
@@ -237,7 +265,7 @@ ${options.user}` : options.user;
     throw new Error('No content received from AI service');
   }
 
-  async analyzeRepository(repository: Repository, readmeContent: string, customCategories?: string[]): Promise<{
+  async analyzeRepository(repository: Repository, readmeContent: string, customCategories?: string[], signal?: AbortSignal): Promise<{
     summary: string;
     tags: string[];
     platforms: string[];
@@ -256,6 +284,7 @@ ${options.user}` : options.user;
         user: prompt,
         temperature: 0.3,
         maxTokens: 700,
+        signal,
       });
 
       return this.parseAIResponse(content);
@@ -445,111 +474,23 @@ Focus on practicality and accurate categorization to help users quickly understa
     }
   }
 
-  private fallbackAnalysis(repository: Repository): { summary: string; tags: string[]; platforms: string[] } {
-    const summary = repository.description 
-      ? `${repository.description}（${repository.language || (this.language === 'zh' ? '未知语言' : 'Unknown language')}${this.language === 'zh' ? '项目' : ' project'}）`
-      : (this.language === 'zh' 
-          ? `一个${repository.language || '软件'}项目，拥有${repository.stargazers_count}个星标`
-          : `A ${repository.language || 'software'} project with ${repository.stargazers_count} stars`
-        );
+  async testConnection(): Promise<ConnectionTestResult> {
+    const apiType = this.getApiType();
+    const timeoutMs = apiType === 'openai-responses' || this.config.reasoningEffort ? 30000 : 10000;
 
-    const tags: string[] = [];
-    const platforms: string[] = [];
-    
-    // Add language-based tags and platforms
-    if (repository.language) {
-      const langMap: Record<string, { tag: string; platforms: string[] }> = this.language === 'zh' ? {
-        'JavaScript': { tag: 'Web应用', platforms: ['web', 'cli'] },
-        'TypeScript': { tag: 'Web应用', platforms: ['web', 'cli'] }, 
-        'Python': { tag: 'Python工具', platforms: ['linux', 'mac', 'windows', 'cli'] },
-        'Java': { tag: 'Java应用', platforms: ['linux', 'mac', 'windows'] },
-        'Go': { tag: '系统工具', platforms: ['linux', 'mac', 'windows', 'cli'] },
-        'Rust': { tag: '系统工具', platforms: ['linux', 'mac', 'windows', 'cli'] },
-        'C++': { tag: '系统软件', platforms: ['linux', 'mac', 'windows'] },
-        'C': { tag: '系统软件', platforms: ['linux', 'mac', 'windows'] },
-        'Swift': { tag: '移动应用', platforms: ['ios', 'mac'] },
-        'Kotlin': { tag: '移动应用', platforms: ['android'] },
-        'Dart': { tag: '移动应用', platforms: ['ios', 'android'] },
-        'PHP': { tag: 'Web应用', platforms: ['web', 'linux'] },
-        'Ruby': { tag: 'Web应用', platforms: ['web', 'linux', 'mac'] },
-        'Shell': { tag: '脚本工具', platforms: ['linux', 'mac', 'cli'] }
-      } : {
-        'JavaScript': { tag: 'Web App', platforms: ['web', 'cli'] },
-        'TypeScript': { tag: 'Web App', platforms: ['web', 'cli'] }, 
-        'Python': { tag: 'Python Tool', platforms: ['linux', 'mac', 'windows', 'cli'] },
-        'Java': { tag: 'Java App', platforms: ['linux', 'mac', 'windows'] },
-        'Go': { tag: 'System Tool', platforms: ['linux', 'mac', 'windows', 'cli'] },
-        'Rust': { tag: 'System Tool', platforms: ['linux', 'mac', 'windows', 'cli'] },
-        'C++': { tag: 'System Software', platforms: ['linux', 'mac', 'windows'] },
-        'C': { tag: 'System Software', platforms: ['linux', 'mac', 'windows'] },
-        'Swift': { tag: 'Mobile App', platforms: ['ios', 'mac'] },
-        'Kotlin': { tag: 'Mobile App', platforms: ['android'] },
-        'Dart': { tag: 'Mobile App', platforms: ['ios', 'android'] },
-        'PHP': { tag: 'Web App', platforms: ['web', 'linux'] },
-        'Ruby': { tag: 'Web App', platforms: ['web', 'linux', 'mac'] },
-        'Shell': { tag: 'Script Tool', platforms: ['linux', 'mac', 'cli'] }
-      };
-      
-      const langInfo = langMap[repository.language];
-      if (langInfo) {
-        tags.push(langInfo.tag);
-        platforms.push(...langInfo.platforms);
-      }
-    }
-    
-    // Add category based on keywords
-    const desc = (repository.description || '').toLowerCase();
-    const name = repository.name.toLowerCase();
-    const searchText = `${desc} ${name}`;
-    
-    const keywordMap = this.language === 'zh' ? {
-      web: { keywords: ['web', 'frontend', 'website'], tag: 'Web应用', platforms: ['web'] },
-      api: { keywords: ['api', 'backend', 'server'], tag: '后端服务', platforms: ['linux', 'docker'] },
-      cli: { keywords: ['cli', 'command', 'tool'], tag: '命令行工具', platforms: ['cli', 'linux', 'mac', 'windows'] },
-      library: { keywords: ['library', 'framework', 'sdk'], tag: '开发库', platforms: [] },
-      mobile: { keywords: ['mobile', 'android', 'ios'], tag: '移动应用', platforms: [] },
-      game: { keywords: ['game', 'gaming'], tag: '游戏', platforms: ['windows', 'mac', 'linux'] },
-      ai: { keywords: ['ai', 'ml', 'machine learning'], tag: 'AI工具', platforms: ['linux', 'mac', 'windows'] },
-      database: { keywords: ['database', 'db', 'storage'], tag: '数据库', platforms: ['linux', 'docker'] },
-      docker: { keywords: ['docker', 'container'], tag: '容器化', platforms: ['docker'] }
-    } : {
-      web: { keywords: ['web', 'frontend', 'website'], tag: 'Web App', platforms: ['web'] },
-      api: { keywords: ['api', 'backend', 'server'], tag: 'Backend Service', platforms: ['linux', 'docker'] },
-      cli: { keywords: ['cli', 'command', 'tool'], tag: 'CLI Tool', platforms: ['cli', 'linux', 'mac', 'windows'] },
-      library: { keywords: ['library', 'framework', 'sdk'], tag: 'Development Library', platforms: [] },
-      mobile: { keywords: ['mobile', 'android', 'ios'], tag: 'Mobile App', platforms: [] },
-      game: { keywords: ['game', 'gaming'], tag: 'Game', platforms: ['windows', 'mac', 'linux'] },
-      ai: { keywords: ['ai', 'ml', 'machine learning'], tag: 'AI Tool', platforms: ['linux', 'mac', 'windows'] },
-      database: { keywords: ['database', 'db', 'storage'], tag: 'Database', platforms: ['linux', 'docker'] },
-      docker: { keywords: ['docker', 'container'], tag: 'Containerized', platforms: ['docker'] }
-    };
-
-    Object.values(keywordMap).forEach(({ keywords, tag, platforms: keywordPlatforms }) => {
-      if (keywords.some(keyword => searchText.includes(keyword))) {
-        tags.push(tag);
-        platforms.push(...keywordPlatforms);
-      }
-    });
-
-    // Handle specific mobile platforms
-    if (searchText.includes('android')) platforms.push('android');
-    if (searchText.includes('ios')) platforms.push('ios');
-
-    return {
-      summary: summary.substring(0, 50),
-      tags: [...new Set(tags)].slice(0, 5), // Remove duplicates and limit to 5
-      platforms: [...new Set(platforms)].slice(0, 8), // Remove duplicates and limit to 8
-    };
-  }
-
-  async testConnection(): Promise<boolean> {
     try {
       const base = new URL(this.config.baseUrl);
-      if (base.protocol !== 'http:' && base.protocol !== 'https:') return false;
+      if (base.protocol !== 'http:' && base.protocol !== 'https:') {
+        return {
+          success: false,
+          errorType: 'unknown',
+          message: this.language === 'zh'
+            ? '无效的协议，请使用 http:// 或 https://'
+            : 'Invalid protocol, please use http:// or https://',
+        };
+      }
 
       const controller = new AbortController();
-      const apiType = this.getApiType();
-      const timeoutMs = apiType === 'openai-responses' || this.config.reasoningEffort ? 30000 : 10000;
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const content = await this.requestText({
@@ -559,12 +500,92 @@ Focus on practicality and accurate categorization to help users quickly understa
           maxTokens: 50,
           signal: controller.signal,
         });
-        return !!content;
+        if (content) {
+          return {
+            success: true,
+            message: this.language === 'zh' ? '连接成功' : 'Connection successful',
+          };
+        }
+        return {
+          success: false,
+          errorType: 'unknown',
+          message: this.language === 'zh' ? '未收到响应内容' : 'No content received',
+        };
       } finally {
         clearTimeout(timeoutId);
       }
     } catch (error) {
-      return false;
+      const err = error as Error;
+      const errorMessage = err.message || '';
+
+      // 解析状态码
+      const statusMatch = errorMessage.match(/(\d{3})/);
+      const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : undefined;
+
+      // 处理超时错误
+      if (errorMessage.includes('timeout') || errorMessage.includes('abort') || err.name === 'AbortError') {
+        return {
+          success: false,
+          errorType: 'timeout',
+          message: this.language === 'zh'
+            ? `连接超时（${timeoutMs / 1000}秒）。请检查：1. 网络连接是否正常 2. API端点是否正确 3. 服务器是否响应缓慢`
+            : `Connection timeout (${timeoutMs / 1000}s). Please check: 1. Network connection 2. API endpoint 3. Server response time`,
+        };
+      }
+
+      // 处理网络错误
+      if (errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Failed to fetch')) {
+        return {
+          success: false,
+          errorType: 'network',
+          message: this.language === 'zh'
+            ? '网络连接失败。请检查：1. 网络连接是否正常 2. API端点地址是否正确 3. 防火墙或代理设置'
+            : 'Network connection failed. Please check: 1. Network connection 2. API endpoint 3. Firewall or proxy settings',
+        };
+      }
+
+      // 如果有状态码，提供详细的错误信息
+      if (statusCode) {
+        const meaning = getStatusCodeMeaning(statusCode, this.language);
+        const errorType = getErrorTypeFromStatus(statusCode) ?? 'unknown';
+        const suggestions: Record<string, { zh: string; en: string }> = {
+          auth: {
+            zh: '请检查 API 密钥是否正确，或密钥是否已过期',
+            en: 'Please check if the API key is correct or expired',
+          },
+          timeout: {
+            zh: '请求超时，请稍后重试或检查网络连接',
+            en: 'Request timeout, please retry later or check network',
+          },
+          server: {
+            zh: '服务器端错误，请稍后重试或联系服务提供商',
+            en: 'Server error, please retry later or contact provider',
+          },
+          unknown: {
+            zh: '请检查 API 端点、模型名称和请求参数是否正确',
+            en: 'Please check API endpoint, model name and request parameters',
+          },
+        };
+
+        return {
+          success: false,
+          statusCode,
+          statusText: meaning,
+          errorType,
+          message: this.language === 'zh'
+            ? `HTTP ${statusCode} - ${meaning}\n建议：${suggestions[errorType].zh}`
+            : `HTTP ${statusCode} - ${meaning}\nSuggestion: ${suggestions[errorType].en}`,
+        };
+      }
+
+      // 默认错误
+      return {
+        success: false,
+        errorType: 'unknown',
+        message: this.language === 'zh'
+          ? `连接失败：${errorMessage || '未知错误'}\n请检查 API 端点、API 密钥和模型名称是否正确`
+          : `Connection failed: ${errorMessage || 'Unknown error'}\nPlease check API endpoint, API key and model name`,
+      };
     }
   }
 
@@ -718,83 +739,14 @@ Reply in JSON format:
     }
   }
 
-  private createEnhancedSearchPrompt(query: string): string {
-    if (this.language === 'zh') {
-      return `
-用户搜索查询: "${query}"
-
-请深度分析这个搜索查询并提供：
-1. 核心搜索意图和目标
-2. 多语言关键词（中文、英文、技术术语）
-3. 相关的应用类型、技术栈、平台类型
-4. 同义词和相关概念
-5. 重要性权重（用于排序）
-
-以JSON格式回复：
-{
-  "intent": "用户的核心搜索意图",
-  "keywords": {
-    "primary": ["主要关键词1", "primary keyword1"],
-    "secondary": ["次要关键词1", "secondary keyword1"],
-    "technical": ["技术术语1", "technical term1"]
-  },
-  "categories": ["应用分类1", "category1"],
-  "platforms": ["平台类型1", "platform1"],
-  "synonyms": ["同义词1", "synonym1"],
-  "weights": {
-    "name_match": 0.4,
-    "description_match": 0.3,
-    "tags_match": 0.2,
-    "summary_match": 0.1
-  }
-}
-
-注意：请确保能够跨语言匹配，即使用户用中文搜索，也要能匹配到英文仓库，反之亦然。
-      `.trim();
-    } else {
-      return `
-User search query: "${query}"
-
-Please deeply analyze this search query and provide:
-1. Core search intent and objectives
-2. Multilingual keywords (Chinese, English, technical terms)
-3. Related application types, tech stacks, platform types
-4. Synonyms and related concepts
-5. Importance weights (for ranking)
-
-Reply in JSON format:
-{
-  "intent": "User's core search intent",
-  "keywords": {
-    "primary": ["primary keyword1", "主要关键词1"],
-    "secondary": ["secondary keyword1", "次要关键词1"],
-    "technical": ["technical term1", "技术术语1"]
-  },
-  "categories": ["category1", "应用分类1"],
-  "platforms": ["platform1", "平台类型1"],
-  "synonyms": ["synonym1", "同义词1"],
-  "weights": {
-    "name_match": 0.4,
-    "description_match": 0.3,
-    "tags_match": 0.2,
-    "summary_match": 0.1
-  }
-}
-
-Note: Ensure cross-language matching, so Chinese queries can match English repositories and vice versa.
-      `.trim();
-    }
-  }
-
   private parseSearchResponse(content: string): string[] {
     try {
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
+      const parsed = this.extractAndParseAIJson(content);
+      if (parsed) {
         const allTerms = [
-          ...(parsed.keywords || []),
-          ...(parsed.categories || []),
-          ...(parsed.synonyms || [])
+          ...(Array.isArray(parsed.keywords) ? parsed.keywords : []),
+          ...(Array.isArray(parsed.categories) ? parsed.categories : []),
+          ...(Array.isArray(parsed.synonyms) ? parsed.synonyms : []),
         ];
         return allTerms.filter(term => typeof term === 'string' && term.length > 0);
       }
@@ -802,61 +754,6 @@ Note: Ensure cross-language matching, so Chinese queries can match English repos
       console.warn('Failed to parse AI search response:', error);
     }
     return [];
-  }
-
-  private parseEnhancedSearchResponse(content: string): {
-    intent: string;
-    keywords: {
-      primary: string[];
-      secondary: string[];
-      technical: string[];
-    };
-    categories: string[];
-    platforms: string[];
-    synonyms: string[];
-    weights: {
-      name_match: number;
-      description_match: number;
-      tags_match: number;
-      summary_match: number;
-    };
-  } {
-    const defaultResponse = {
-      intent: '',
-      keywords: { primary: [], secondary: [], technical: [] },
-      categories: [],
-      platforms: [],
-      synonyms: [],
-      weights: { name_match: 0.4, description_match: 0.3, tags_match: 0.2, summary_match: 0.1 }
-    };
-
-    try {
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return {
-          intent: parsed.intent || '',
-          keywords: {
-            primary: Array.isArray(parsed.keywords?.primary) ? parsed.keywords.primary : [],
-            secondary: Array.isArray(parsed.keywords?.secondary) ? parsed.keywords.secondary : [],
-            technical: Array.isArray(parsed.keywords?.technical) ? parsed.keywords.technical : []
-          },
-          categories: Array.isArray(parsed.categories) ? parsed.categories : [],
-          platforms: Array.isArray(parsed.platforms) ? parsed.platforms : [],
-          synonyms: Array.isArray(parsed.synonyms) ? parsed.synonyms : [],
-          weights: {
-            name_match: parsed.weights?.name_match || 0.4,
-            description_match: parsed.weights?.description_match || 0.3,
-            tags_match: parsed.weights?.tags_match || 0.2,
-            summary_match: parsed.weights?.summary_match || 0.1
-          }
-        };
-      }
-    } catch (error) {
-      console.warn('Failed to parse enhanced AI search response:', error);
-    }
-    
-    return defaultResponse;
   }
 
   private performEnhancedSearch(repositories: Repository[], originalQuery: string, aiTerms: string[]): Repository[] {
@@ -882,145 +779,6 @@ Note: Ensure cross-language matching, so Chinese queries can match English repos
                normalizedTerm.split(/\s+/).every(word => searchableText.includes(word));
       });
     });
-  }
-
-  private performSemanticSearchWithReranking(
-    repositories: Repository[], 
-    originalQuery: string, 
-    searchAnalysis: any
-  ): Repository[] {
-    // Collect all search terms from the analysis
-    const allSearchTerms = [
-      originalQuery,
-      ...searchAnalysis.keywords.primary,
-      ...searchAnalysis.keywords.secondary,
-      ...searchAnalysis.keywords.technical,
-      ...searchAnalysis.categories,
-      ...searchAnalysis.platforms,
-      ...searchAnalysis.synonyms
-    ].filter(term => term && typeof term === 'string');
-
-    // First, filter repositories that match any search terms
-    const matchedRepos = repositories.filter(repo => {
-      const searchableFields = {
-        name: repo.name.toLowerCase(),
-        fullName: repo.full_name.toLowerCase(),
-        description: (repo.description || '').toLowerCase(),
-        language: (repo.language || '').toLowerCase(),
-        topics: (repo.topics || []).join(' ').toLowerCase(),
-        aiSummary: (repo.ai_summary || '').toLowerCase(),
-        aiTags: (repo.ai_tags || []).join(' ').toLowerCase(),
-        aiPlatforms: (repo.ai_platforms || []).join(' ').toLowerCase(),
-        customDescription: (repo.custom_description || '').toLowerCase(),
-        customTags: (repo.custom_tags || []).join(' ').toLowerCase()
-      };
-
-      // Check if any search term matches any field
-      return allSearchTerms.some(term => {
-        const normalizedTerm = term.toLowerCase();
-        return Object.values(searchableFields).some(fieldValue => {
-          return fieldValue.includes(normalizedTerm) ||
-                 // Fuzzy matching for partial matches
-                 normalizedTerm.split(/\s+/).every(word => fieldValue.includes(word));
-        });
-      });
-    });
-
-    // If no matches found, return empty array (don't show irrelevant results)
-    if (matchedRepos.length === 0) {
-      return [];
-    }
-
-    // Calculate relevance scores for matched repositories
-    const scoredRepos = matchedRepos.map(repo => {
-      let score = 0;
-      const weights = searchAnalysis.weights;
-
-      const searchableFields = {
-        name: repo.name.toLowerCase(),
-        fullName: repo.full_name.toLowerCase(),
-        description: (repo.description || '').toLowerCase(),
-        language: (repo.language || '').toLowerCase(),
-        topics: (repo.topics || []).join(' ').toLowerCase(),
-        aiSummary: (repo.ai_summary || '').toLowerCase(),
-        aiTags: (repo.ai_tags || []).join(' ').toLowerCase(),
-        aiPlatforms: (repo.ai_platforms || []).join(' ').toLowerCase(),
-        customDescription: (repo.custom_description || '').toLowerCase(),
-        customTags: (repo.custom_tags || []).join(' ').toLowerCase()
-      };
-
-      // Score based on different types of matches
-      allSearchTerms.forEach(term => {
-        const normalizedTerm = term.toLowerCase();
-        
-        // Name matches (highest weight)
-        if (searchableFields.name.includes(normalizedTerm) || searchableFields.fullName.includes(normalizedTerm)) {
-          score += weights.name_match;
-        }
-
-        // Description matches
-        if (searchableFields.description.includes(normalizedTerm) || searchableFields.customDescription.includes(normalizedTerm)) {
-          score += weights.description_match;
-        }
-
-        // Tags and topics matches
-        if (searchableFields.topics.includes(normalizedTerm) || 
-            searchableFields.aiTags.includes(normalizedTerm) || 
-            searchableFields.customTags.includes(normalizedTerm)) {
-          score += weights.tags_match;
-        }
-
-        // AI summary matches
-        if (searchableFields.aiSummary.includes(normalizedTerm)) {
-          score += weights.summary_match;
-        }
-
-        // Platform matches
-        if (searchableFields.aiPlatforms.includes(normalizedTerm)) {
-          score += weights.tags_match * 0.8; // Slightly lower than tags
-        }
-
-        // Language matches
-        if (searchableFields.language.includes(normalizedTerm)) {
-          score += weights.tags_match * 0.6;
-        }
-      });
-
-      // Boost score for primary keywords
-      searchAnalysis.keywords.primary.forEach(primaryTerm => {
-        const normalizedTerm = primaryTerm.toLowerCase();
-        Object.values(searchableFields).forEach(fieldValue => {
-          if (fieldValue.includes(normalizedTerm)) {
-            score += 0.2; // Additional boost for primary keywords
-          }
-        });
-      });
-
-      // Boost score for exact matches
-      const exactMatch = allSearchTerms.some(term => {
-        const normalizedTerm = term.toLowerCase();
-        return searchableFields.name === normalizedTerm || 
-               searchableFields.name.includes(` ${normalizedTerm} `) ||
-               searchableFields.name.startsWith(`${normalizedTerm} `) ||
-               searchableFields.name.endsWith(` ${normalizedTerm}`);
-      });
-      
-      if (exactMatch) {
-        score += 0.5;
-      }
-
-      // Consider repository popularity as a tie-breaker
-      const popularityScore = Math.log10(repo.stargazers_count + 1) * 0.05;
-      score += popularityScore;
-
-      return { repo, score };
-    });
-
-    // Sort by relevance score (descending) and return only repositories with meaningful scores
-    return scoredRepos
-      .filter(item => item.score > 0.1) // Filter out very low relevance matches
-      .sort((a, b) => b.score - a.score)
-      .map(item => item.repo);
   }
 
   private performBasicSearch(repositories: Repository[], query: string): Repository[] {

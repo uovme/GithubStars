@@ -179,7 +179,7 @@ class BackendAdapter {
       method: 'POST',
       headers: this.getAuthHeaders(),
       body: JSON.stringify({ configId, body })
-    });
+    }, 120000);
     if (!res.ok) await this.throwTranslatedError(res, 'AI proxy error');
     return res.json();
   }
@@ -204,7 +204,7 @@ class BackendAdapter {
     const res = await this.fetchWithTimeout(`${this._backendUrl}/repositories`, {
       method: 'PUT',
       headers: this.getAuthHeaders(),
-      body: JSON.stringify({ repositories: repos })
+      body: JSON.stringify({ repositories: repos, isFullSync: true })
     });
     if (!res.ok) await this.throwTranslatedError(res, 'Sync repositories error');
   }
@@ -354,6 +354,48 @@ class BackendAdapter {
     } catch {
       return false;
     }
+  }
+
+  // === GitHub Search Proxy ===
+
+  async searchRepositories(queryParams: Record<string, string>): Promise<{ items: Repository[] }> {
+    if (!this._backendUrl) throw new Error('Backend not available');
+
+    const res = await this.fetchWithTimeout(`${this._backendUrl}/proxy/github/search/repositories`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({ query_params: queryParams })
+    });
+    if (!res.ok) await this.throwTranslatedError(res, 'Search repositories proxy error');
+    return res.json() as Promise<{ items: Repository[] }>;
+  }
+
+  async searchUsers(queryParams: Record<string, string>): Promise<{ items: Array<{
+    login: string;
+    avatar_url: string;
+    html_url: string;
+    name: string | null;
+    bio: string | null;
+    public_repos: number;
+    followers: number;
+  }> }> {
+    if (!this._backendUrl) throw new Error('Backend not available');
+
+    const res = await this.fetchWithTimeout(`${this._backendUrl}/proxy/github/search/users`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({ query_params: queryParams })
+    });
+    if (!res.ok) await this.throwTranslatedError(res, 'Search users proxy error');
+    return res.json() as Promise<{ items: Array<{
+      login: string;
+      avatar_url: string;
+      html_url: string;
+      name: string | null;
+      bio: string | null;
+      public_repos: number;
+      followers: number;
+    }> }>;
   }
 }
 

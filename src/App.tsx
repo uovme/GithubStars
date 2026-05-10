@@ -1,30 +1,69 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo, useCallback } from 'react';
 import { LoginScreen } from './components/LoginScreen';
 import { Header } from './components/Header';
 import { SearchBar } from './components/SearchBar';
 import { RepositoryList } from './components/RepositoryList';
 import { CategorySidebar } from './components/CategorySidebar';
 import { ReleaseTimeline } from './components/ReleaseTimeline';
+import { ForkTimeline } from './components/ForkTimeline';
 import { SettingsPanel } from './components/SettingsPanel';
+import { DiscoveryView } from './components/DiscoveryView';
+import { BackToTop } from './components/BackToTop';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { useAppStore } from './store/useAppStore';
 import { backend } from './services/backendAdapter';
 import { syncFromBackend, startAutoSync, stopAutoSync } from './services/autoSync';
+import type { AppState } from './types';
+
+const RepositoriesView = React.memo(({ 
+  repositories, 
+  searchResults, 
+  selectedCategory, 
+  onCategorySelect 
+}: { 
+  repositories: AppState['repositories'];
+  searchResults: AppState['searchResults'];
+  selectedCategory: string;
+  onCategorySelect: (category: string) => void;
+}) => (
+  <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
+    <CategorySidebar 
+      repositories={repositories}
+      selectedCategory={selectedCategory}
+      onCategorySelect={onCategorySelect}
+    />
+    <div className="flex-1 space-y-6">
+      <SearchBar />
+      <RepositoryList 
+        repositories={searchResults.length > 0 ? searchResults : repositories}
+        selectedCategory={selectedCategory}
+      />
+    </div>
+  </div>
+));
+RepositoriesView.displayName = 'RepositoriesView';
+
+const ReleasesView = React.memo(() => <ReleaseTimeline />);
+ReleasesView.displayName = 'ReleasesView';
+
+const ForksView = React.memo(() => <ForkTimeline />);
+ForksView.displayName = 'ForksView';
+
+const SettingsView = React.memo(() => <SettingsPanel />);
+SettingsView.displayName = 'SettingsView';
 
 function App() {
-  const { 
-    isAuthenticated, 
-    currentView, 
+  const {
+    isAuthenticated,
+    currentView,
     selectedCategory,
     theme,
+    hasHydrated,
     searchResults,
     repositories,
     setSelectedCategory,
   } = useAppStore();
 
-  // 自动检查更新
-  // useAutoUpdateCheck(); // Disabled: not needed for self-hosted deployment
-
-  // Apply theme to document
   useEffect(() => {
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
@@ -33,7 +72,6 @@ function App() {
     }
   }, [theme]);
 
-  // Initialize backend adapter and auto-sync
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
     let cancelled = false;
@@ -62,47 +100,60 @@ function App() {
     };
   }, []);
 
-  // Show login screen if not authenticated
+  const handleCategorySelect = useCallback((category: string) => {
+    setSelectedCategory(category);
+  }, [setSelectedCategory]);
+
+  const currentViewContent = useMemo(() => {
+    switch (currentView) {
+      case 'repositories':
+        return (
+          <RepositoriesView
+            repositories={repositories}
+            searchResults={searchResults}
+            selectedCategory={selectedCategory}
+            onCategorySelect={handleCategorySelect}
+          />
+        );
+      case 'releases':
+        return <ReleasesView />;
+      case 'forks':
+        return <ForksView />;
+      case 'subscription':
+        return (
+          <ErrorBoundary>
+            <DiscoveryView />
+          </ErrorBoundary>
+        );
+      case 'settings':
+        return <SettingsView />;
+      default:
+        return null;
+    }
+  }, [currentView, repositories, searchResults, selectedCategory, handleCategorySelect]);
+
+  // Show loading state while store is hydrating to ensure correct theme is applied
+  if (!hasHydrated) {
+    return (
+      <div className="min-h-screen bg-light-bg dark:bg-marketing-black flex items-center justify-center">
+        <div className="text-gray-900 dark:text-text-primary text-lg font-medium animate-pulse">
+          Loading...
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
     return <LoginScreen />;
   }
 
-  // Main application interface
-  const renderCurrentView = () => {
-    switch (currentView) {
-      case 'repositories':
-        return (
-          <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
-            <CategorySidebar 
-              repositories={repositories}
-              selectedCategory={selectedCategory}
-              onCategorySelect={setSelectedCategory}
-            />
-            <div className="flex-1 space-y-6">
-              <SearchBar />
-              <RepositoryList 
-                repositories={searchResults.length > 0 ? searchResults : repositories}
-                selectedCategory={selectedCategory}
-              />
-            </div>
-          </div>
-        );
-      case 'releases':
-        return <ReleaseTimeline />;
-      case 'settings':
-        return <SettingsPanel />;
-      default:
-        return null;
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-
+    <div className="min-h-screen bg-light-bg dark:bg-marketing-black text-gray-900 dark:text-text-primary transition-colors duration-200">
       <Header />
-      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
-        {renderCurrentView()}
+      <main className="max-w-[1200px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
+        {currentViewContent}
       </main>
+      <BackToTop />
     </div>
   );
 }

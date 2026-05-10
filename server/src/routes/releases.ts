@@ -20,6 +20,8 @@ function transformRelease(row: Record<string, unknown>) {
     draft: !!row.draft,
     is_read: !!row.is_read,
     assets: parseJsonColumn(row.assets),
+    zipball_url: row.zipball_url ?? undefined,
+    tarball_url: row.tarball_url ?? undefined,
     repository: {
       id: row.repo_id,
       full_name: row.repo_full_name,
@@ -86,8 +88,8 @@ router.put('/api/releases', (req, res) => {
     }
 
     for (const release of releases) {
-      if (!release.id) {
-        res.status(400).json({ error: 'Each release must have an id', code: 'RELEASE_ID_REQUIRED' });
+      if (!release.id || typeof release.id !== 'number' || release.id <= 0) {
+        res.status(400).json({ error: 'Each release must have a valid positive integer id', code: 'RELEASE_ID_REQUIRED' });
         return;
       }
     }
@@ -96,8 +98,9 @@ router.put('/api/releases', (req, res) => {
       INSERT OR REPLACE INTO releases (
         id, tag_name, name, body, html_url, published_at,
         prerelease, draft, is_read, assets,
-        repo_id, repo_full_name, repo_name
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        repo_id, repo_full_name, repo_name,
+        zipball_url, tarball_url
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const upsert = db.transaction(() => {
@@ -117,7 +120,9 @@ router.put('/api/releases', (req, res) => {
           JSON.stringify(release.assets ?? []),
           repository?.id ?? release.repo_id ?? null,
           repository?.full_name ?? release.repo_full_name ?? null,
-          repository?.name ?? release.repo_name ?? null
+          repository?.name ?? release.repo_name ?? null,
+          release.zipball_url ?? null,
+          release.tarball_url ?? null
         );
         count++;
       }
@@ -167,6 +172,36 @@ router.post('/api/releases/mark-all-read', (_req, res) => {
   } catch (err) {
     console.error('POST /api/releases/mark-all-read error:', err);
     res.status(500).json({ error: 'Failed to mark all as read', code: 'MARK_ALL_READ_FAILED' });
+  }
+});
+
+// DELETE /api/releases/:id
+router.delete('/api/releases/:id', (req, res) => {
+  try {
+    const idStr = req.params.id;
+    if (!/^\d+$/.test(idStr)) {
+      res.status(400).json({ error: 'Valid release id required', code: 'INVALID_RELEASE_ID' });
+      return;
+    }
+    const id = parseInt(idStr, 10);
+
+    if (isNaN(id) || id <= 0) {
+      res.status(400).json({ error: 'Valid release id required', code: 'INVALID_RELEASE_ID' });
+      return;
+    }
+
+    const db = getDb();
+    const result = db.prepare('DELETE FROM releases WHERE id = ?').run(id);
+
+    if (result.changes === 0) {
+      res.status(404).json({ error: 'Release not found', code: 'RELEASE_NOT_FOUND' });
+      return;
+    }
+
+    res.json({ deleted: true, id });
+  } catch (err) {
+    console.error('DELETE /api/releases/:id error:', err);
+    res.status(500).json({ error: 'Failed to delete release', code: 'DELETE_RELEASE_FAILED' });
   }
 });
 

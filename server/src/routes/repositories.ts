@@ -90,6 +90,35 @@ router.put('/api/repositories', (req, res) => {
       return;
     }
 
+    // 验证每个仓库的ID
+    for (const repo of repositories) {
+      if (!repo.id || typeof repo.id !== 'number' || repo.id <= 0) {
+        res.status(400).json({ error: 'Each repository must have a valid positive integer id', code: 'INVALID_REPOSITORY_ID' });
+        return;
+      }
+      if (!repo.full_name || typeof repo.full_name !== 'string') {
+        res.status(400).json({ error: 'Each repository must have a valid full_name', code: 'INVALID_REPOSITORY_FULL_NAME' });
+        return;
+      }
+      if (!repo.name || typeof repo.name !== 'string') {
+        res.status(400).json({ error: 'Each repository must have a valid name', code: 'INVALID_REPOSITORY_NAME' });
+        return;
+      }
+      const owner = repo.owner as Record<string, unknown> | undefined;
+      if (!owner || typeof owner.login !== 'string' || typeof owner.avatar_url !== 'string') {
+        res.status(400).json({ error: 'Each repository must have a valid owner with login and avatar_url', code: 'INVALID_REPOSITORY_OWNER' });
+        return;
+      }
+      if (!repo.html_url || typeof repo.html_url !== 'string') {
+        res.status(400).json({ error: 'Each repository must have a valid html_url', code: 'INVALID_REPOSITORY_HTML_URL' });
+        return;
+      }
+      if (typeof repo.stargazers_count !== 'number' || repo.stargazers_count < 0) {
+        res.status(400).json({ error: 'Each repository must have a valid non-negative stargazers_count', code: 'INVALID_STARGAZERS_COUNT' });
+        return;
+      }
+    }
+
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO repositories (
         id, name, full_name, description, html_url, stargazers_count, language,
@@ -209,6 +238,53 @@ router.patch('/api/repositories/:id', (req, res) => {
   } catch (err) {
     console.error('PATCH /api/repositories error:', err);
     res.status(500).json({ error: 'Failed to update repository', code: 'UPDATE_REPOSITORY_FAILED' });
+  }
+});
+
+// DELETE /api/repositories/:id
+router.delete('/api/repositories/:id', (req, res) => {
+  try {
+    const idStr = req.params.id;
+    if (!/^\d+$/.test(idStr)) {
+      res.status(400).json({ error: 'Valid repository id required', code: 'INVALID_REPOSITORY_ID' });
+      return;
+    }
+    const id = parseInt(idStr, 10);
+
+    if (isNaN(id) || id <= 0) {
+      res.status(400).json({ error: 'Valid repository id required', code: 'INVALID_REPOSITORY_ID' });
+      return;
+    }
+
+    const db = getDb();
+    const deleteReleases = db.prepare('DELETE FROM releases WHERE repo_id = ?');
+    const deleteRepo = db.prepare('DELETE FROM repositories WHERE id = ?');
+
+    const deleteAll = db.transaction(() => {
+      const releaseResult = deleteReleases.run(id);
+      const repoResult = deleteRepo.run(id);
+      
+      return {
+        releasesDeleted: releaseResult.changes,
+        repoDeleted: repoResult.changes
+      };
+    });
+
+    const result = deleteAll();
+
+    if (result.repoDeleted === 0) {
+      res.status(404).json({ error: 'Repository not found', code: 'REPOSITORY_NOT_FOUND' });
+      return;
+    }
+
+    res.json({ 
+      deleted: true, 
+      id,
+      releasesDeleted: result.releasesDeleted
+    });
+  } catch (err) {
+    console.error('DELETE /api/repositories/:id error:', err);
+    res.status(500).json({ error: 'Failed to delete repository', code: 'DELETE_REPOSITORY_FAILED' });
   }
 });
 
