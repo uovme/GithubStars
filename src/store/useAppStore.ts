@@ -55,6 +55,7 @@ const debouncedPersistStorage: PersistStorage<unknown> = {
       if (pendingName && latestValue) {
         try {
           const str = JSON.stringify(latestValue);
+          console.log(`[persist] FLUSH "${pendingName}": ${str.length}bytes`);
           // Synchronous write to localStorage ensures data survives tab close
           safeLocalStorageSet(pendingName, str);
           // Fire-and-forget IndexedDB write
@@ -75,10 +76,14 @@ const debouncedPersistStorage: PersistStorage<unknown> = {
     return (name: string, value: StorageValue<unknown>) => {
       pendingName = name;
       latestValue = value;
+      const stateVal = value as { state?: Record<string, unknown> };
+      const repoCount = Array.isArray(stateVal?.state?.repositories) ? stateVal.state.repositories.length : '?';
+      console.log(`[persist] setItem called: ${name}, repos=${repoCount}`);
       if (timeoutId) clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
         try {
           const str = JSON.stringify(latestValue);
+          console.log(`[persist] debounce fired: ${str.length}bytes`);
           indexedDBStorage.setItem(name, str);
         } catch (e) {
           console.error('Failed to stringify state for persistence', e);
@@ -330,6 +335,9 @@ const normalizePersistedState = (
   currentState: AppState & AppActions
 ): Partial<AppState & AppActions> => {
   const safePersisted = persisted ?? {};
+  const persistedRepoCount = Array.isArray(safePersisted.repositories) ? safePersisted.repositories.length : 0;
+  const persistedAI = Array.isArray(safePersisted.repositories) ? safePersisted.repositories.filter((r: Repository) => r.ai_summary).length : 0;
+  console.log(`[normalize] input: repos=${persistedRepoCount}, withAI=${persistedAI}, keys=${Object.keys(safePersisted).join(',')}`);
   const defaultDiscoveryChannelIds = new Set(defaultDiscoveryChannels.map((channel) => channel.id));
 
   const repositories = Array.isArray(safePersisted.repositories) ? safePersisted.repositories : [];
@@ -1632,9 +1640,11 @@ export const useAppStore = create<AppState & AppActions>()(
           currentState as AppState & AppActions
         );
 
+        const reposWithAI = (normalized.repositories as Repository[] || []).filter(r => r.ai_summary).length;
         console.log('Store rehydrated:', {
           isAuthenticated: normalized.isAuthenticated,
           repositoriesCount: normalized.repositories?.length || 0,
+          reposWithAI,
           lastSync: normalized.lastSync,
           language: normalized.language,
           webdavConfigsCount: normalized.webdavConfigs?.length || 0,

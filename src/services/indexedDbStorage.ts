@@ -126,12 +126,17 @@ export const indexedDBStorage: StateStorage = {
         Promise.resolve(safeLocalStorageGet(name)),
       ]);
 
+      const idbLen = idbValue?.length ?? 0;
+      const lsLen = lsValue?.length ?? 0;
+      console.log(`[storage] getItem "${name}": IDB=${idbLen}bytes, LS=${lsLen}bytes`);
+
       // localStorage is written synchronously (guaranteed latest), so prefer it
       // when both stores have data. This handles stale IndexedDB data from before
       // the write-order fix.
       if (lsValue !== null) {
         // Sync localStorage data to IndexedDB if they differ
         if (idbValue !== lsValue) {
+          console.log(`[storage] LS differs from IDB, syncing LS -> IDB`);
           await withTimeout(idbSet(name, lsValue));
         }
         return lsValue;
@@ -139,10 +144,12 @@ export const indexedDBStorage: StateStorage = {
 
       // Only IndexedDB has data — return it and migrate to localStorage
       if (idbValue !== null) {
+        console.log(`[storage] Only IDB has data, migrating to LS`);
         safeLocalStorageSet(name, idbValue);
         return idbValue;
       }
 
+      console.log(`[storage] Both stores empty`);
       return null;
     } catch (error) {
       console.warn('[storage] IndexedDB get failed, fallback to localStorage:', error);
