@@ -27,7 +27,7 @@ Star too many repos, can't find anything? GithubStarsManager syncs your starred 
 - **Release Timeline** — Subscribe to repos, see new versions in one feed
 - **Smart Filters** — Filter assets by OS, architecture, file type
 - **One-click Download** — Expand and download release assets directly
-- **WebDAV Backup** — Sync data via Jianguoyun, Nextcloud, or any WebDAV server
+- **WebDAV Backup** — Sync data via Jianguoyun, Nextcloud, or any WebDAV server (including AI analysis results & categories)
 - **Bilingual Wiki** — Jump to Deepwiki (EN) or Zread (ZH) per repo
 - **Cross-device Sync** — Optional backend for sharing data across devices
 - **Desktop Client** — Download and run, no setup needed
@@ -58,7 +58,7 @@ npm run dev
 cd server && npm install && npm run dev
 ```
 
-The backend adds cross-device sync, CORS-free API proxying, and encrypted token storage. Without it, everything runs in browser localStorage.
+The backend adds cross-device sync, CORS-free API proxying, and encrypted token storage. Without it, everything runs in browser IndexedDB + localStorage (dual-write ensures data survives tab close).
 
 | Variable | Required | Description |
 |----------|----------|-------------|

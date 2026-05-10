@@ -139,7 +139,11 @@ export const indexedDBStorage: StateStorage = {
   setItem: async (name: string, value: string): Promise<void> => {
     if (typeof window === 'undefined') return;
 
-    // Primary path: IndexedDB first (large data friendly)
+    // Write to localStorage FIRST (synchronous, guaranteed to complete immediately).
+    // This ensures data survives tab close even if the async IndexedDB write never starts.
+    safeLocalStorageSet(name, value);
+
+    // Then write to IndexedDB (async, large data friendly).
     if (canUseIndexedDB()) {
       try {
         await withTimeout(idbSet(name, value));
@@ -147,9 +151,6 @@ export const indexedDBStorage: StateStorage = {
         console.warn('[storage] IndexedDB set failed:', error);
       }
     }
-
-    // Secondary compatibility backup (best effort only)
-    safeLocalStorageSet(name, value);
   },
 
   removeItem: async (name: string): Promise<void> => {

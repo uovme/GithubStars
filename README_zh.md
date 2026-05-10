@@ -27,7 +27,7 @@ Star 了太多仓库，找不到了？GithubStarsManager 自动同步你的 Star
 - **Release 时间线** — 订阅仓库，在一个时间线里查看所有新版本
 - **智能筛选** — 按系统、架构、文件类型筛选资源
 - **一键下载** — 展开并直接下载 Release 资源
-- **WebDAV 备份** — 通过坚果云、Nextcloud 或任意 WebDAV 服务同步数据
+- **WebDAV 备份** — 通过坚果云、Nextcloud 或任意 WebDAV 服务同步数据（含AI分析结果和分类）
 - **双语 Wiki** — 根据仓库语言跳转 Deepwiki（英文）或 Zread（中文）
 - **跨设备同步** — 可选后端服务，多设备共享数据
 - **桌面客户端** — 下载即用，无需配置环境
@@ -58,7 +58,7 @@ npm run dev
 cd server && npm install && npm run dev
 ```
 
-后端提供跨设备同步、免 CORS 的 API 代理和加密 Token 存储。不部署后端时，所有数据存在浏览器 localStorage 中。
+后端提供跨设备同步、免 CORS 的 API 代理和加密 Token 存储。不部署后端时，所有数据存在浏览器 IndexedDB + localStorage 中（双写保障，关闭标签页不丢数据）。
 
 | 变量 | 必填 | 说明 |
 |------|------|------|

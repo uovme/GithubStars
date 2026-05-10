@@ -3,6 +3,7 @@ import { Download, Upload, RefreshCw, Cloud, AlertCircle } from 'lucide-react';
 import { AIConfig, WebDAVConfig } from '../../types';
 import { useAppStore } from '../../store/useAppStore';
 import { WebDAVService } from '../../services/webdavService';
+import { discoveryAnalysisStorage } from '../../services/discoveryAnalysisStorage';
 import { useDialog } from '../../hooks/useDialog';
 
 interface BackupPanelProps {
@@ -51,11 +52,23 @@ export const BackupPanel: React.FC<BackupPanelProps> = ({ t }) => {
     try {
       const webdavService = new WebDAVService(activeConfig);
 
+      // 导出发现页面的AI分析结果
+      let discoveryAnalyses: Record<number, unknown> = {};
+      try {
+        const allAnalyses = await discoveryAnalysisStorage.loadAllAnalyses();
+        allAnalyses.forEach((data, repoId) => {
+          discoveryAnalyses[repoId] = data;
+        });
+      } catch (e) {
+        console.warn('导出发现分析数据失败:', e);
+      }
+
       const backupData = {
         repositories,
         releases,
         customCategories,
         hiddenDefaultCategoryIds,
+        discoveryAnalyses,
         aiConfigs: aiConfigs.map(config => ({
           ...config,
           apiKey: config.apiKey ? '***' : ''
@@ -65,7 +78,7 @@ export const BackupPanel: React.FC<BackupPanelProps> = ({ t }) => {
           password: config.password ? '***' : ''
         })),
         exportedAt: new Date().toISOString(),
-        version: '1.0'
+        version: '1.1'
       };
 
       const filename = `github-stars-backup-${new Date().toISOString().split('T')[0]}.json`;
@@ -208,6 +221,20 @@ export const BackupPanel: React.FC<BackupPanelProps> = ({ t }) => {
         }
 
         try {
+          if (backupData.discoveryAnalyses && typeof backupData.discoveryAnalyses === 'object') {
+            const entries = Object.entries(backupData.discoveryAnalyses);
+            for (const [repoIdStr, data] of entries) {
+              const repoId = Number(repoIdStr);
+              if (!isNaN(repoId) && data) {
+                await discoveryAnalysisStorage.saveAnalysis(repoId, data as Parameters<typeof discoveryAnalysisStorage.saveAnalysis>[1]);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('恢复发现分析数据时发生问题：', e);
+        }
+
+        try {
           if (Array.isArray(backupData.webdavConfigs)) {
             const latestWebDAVConfigs = useAppStore.getState().webdavConfigs;
             const currentMap = new Map(latestWebDAVConfigs.map((c: WebDAVConfig) => [c.id, c]));
@@ -243,8 +270,8 @@ export const BackupPanel: React.FC<BackupPanelProps> = ({ t }) => {
         }
 
         toast(t(
-          `已从备份恢复数据：仓库 ${backupData.repositories?.length ?? 0}，发布 ${backupData.releases?.length ?? 0}，自定义分类 ${backupData.customCategories?.length ?? 0}。`,
-          `Data restored from backup: repositories ${backupData.repositories?.length ?? 0}, releases ${backupData.releases?.length ?? 0}, custom categories ${backupData.customCategories?.length ?? 0}.`
+          `已从备份恢复数据：仓库 ${backupData.repositories?.length ?? 0}，发布 ${backupData.releases?.length ?? 0}，自定义分类 ${backupData.customCategories?.length ?? 0}，发现分析 ${Object.keys(backupData.discoveryAnalyses ?? {}).length}。`,
+          `Data restored from backup: repositories ${backupData.repositories?.length ?? 0}, releases ${backupData.releases?.length ?? 0}, custom categories ${backupData.customCategories?.length ?? 0}, discovery analyses ${Object.keys(backupData.discoveryAnalyses ?? {}).length}.`
         ), 'success');
       } catch (error) {
         console.error('Restore failed:', error);
@@ -351,9 +378,10 @@ export const BackupPanel: React.FC<BackupPanelProps> = ({ t }) => {
           {t('备份内容包括：', 'Backup includes:')}
         </h4>
         <ul className="text-sm text-gray-700 dark:text-text-tertiary space-y-1">
-          <li>• {t('GitHub Stars 仓库列表', 'GitHub Stars repository list')}</li>
+          <li>• {t('GitHub Stars 仓库列表（含AI分析结果、自定义分类）', 'GitHub Stars repository list (with AI analysis results & custom categories)')}</li>
           <li>• {t('Release 发布信息', 'Release information')}</li>
           <li>• {t('自定义分类', 'Custom categories')}</li>
+          <li>• {t('发现页面AI分析结果', 'Discovery page AI analysis results')}</li>
           <li>• {t('AI 服务配置', 'AI service configurations')}</li>
           <li>• {t('WebDAV 配置', 'WebDAV configurations')}</li>
         </ul>
