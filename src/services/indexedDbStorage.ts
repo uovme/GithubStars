@@ -6,7 +6,7 @@ const DB_VERSION = 1;
 
 export const canUseIndexedDB = () => typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined';
 
-const withTimeout = async <T>(promise: Promise<T>, timeoutMs = 2000): Promise<T> => {
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs = 3000): Promise<T> => {
   return await Promise.race([
     promise,
     new Promise<T>((_, reject) => setTimeout(() => reject(new Error('IndexedDB timeout')), timeoutMs)),
@@ -26,7 +26,11 @@ const LOCAL_STORAGE_SIZE_LIMIT = 4.5 * 1024 * 1024; // 4.5MB safe threshold
 
 export const safeLocalStorageSet = (key: string, value: string): void => {
   if (value.length > LOCAL_STORAGE_SIZE_LIMIT) {
-    console.warn(`[storage] Skipping localStorage write for "${key}": ${value.length} bytes exceeds ${LOCAL_STORAGE_SIZE_LIMIT} limit`);
+    // Data too large for localStorage — skip to prevent silent truncation.
+    // IndexedDB is the authoritative store; remove stale truncated localStorage copy.
+    try {
+      window.localStorage.removeItem(key);
+    } catch { /* ignore */ }
     return;
   }
   try {
@@ -112,62 +116,49 @@ const idbDelete = async (key: string): Promise<void> => {
 };
 
 /**
- * IndexedDB-backed Zustand persist storage with seamless migration + dual write:
- * - First read from IndexedDB
- * - If empty, fall back to existing localStorage snapshot and migrate to IndexedDB
- * - Every write goes to IndexedDB and localStorage (backward compatibility window)
+ * IndexedDB-backed Zustand persist storage.
+ *
+ * IndexedDB is the authoritative store (no size limit, survives tab close).
+ * localStorage is a secondary backup for environments without IndexedDB.
+ *
+ * Read:  IndexedDB first → localStorage fallback
+ * Write: IndexedDB first → localStorage backup (skipped if data > 4.5MB)
  */
 export const indexedDBStorage: StateStorage = {
   getItem: async (name: string): Promise<string | null> => {
     if (typeof window === 'undefined') return null;
 
-    // Hard fallback for environments without IndexedDB
     if (!canUseIndexedDB()) {
       return safeLocalStorageGet(name);
     }
 
     try {
-      // Read from both stores in parallel
-      const [idbValue, lsValue] = await Promise.all([
-        withTimeout(idbGet(name)),
-        Promise.resolve(safeLocalStorageGet(name)),
-      ]);
-
-      const idbLen = idbValue?.length ?? 0;
-      const lsLen = lsValue?.length ?? 0;
-      console.log(`[storage] getItem "${name}": IDB=${idbLen}bytes, LS=${lsLen}bytes`);
-
-      // Both stores have data — prefer the larger one (localStorage has a ~5MB quota
-      // and silently truncates oversized writes, so the smaller value is likely incomplete).
-      if (idbValue !== null && lsValue !== null) {
-        if (idbValue !== lsValue) {
-          if (idbValue.length > lsValue.length) {
-            // IndexedDB has more complete data — sync it to localStorage
-            console.log(`[storage] IDB larger (${idbLen} > ${lsLen}), syncing IDB -> LS`);
-            safeLocalStorageSet(name, idbValue);
-            return idbValue;
-          } else {
-            // localStorage is newer/larger — sync it to IndexedDB
-            console.log(`[storage] LS larger (${lsLen} > ${idbLen}), syncing LS -> IDB`);
-            await withTimeout(idbSet(name, lsValue));
-            return lsValue;
-          }
-        }
-        return lsValue;
-      }
-
-      // Only one store has data
-      if (lsValue !== null) {
-        return lsValue;
-      }
+      const idbValue = await withTimeout(idbGet(name));
 
       if (idbValue !== null) {
-        console.log(`[storage] Only IDB has data, migrating to LS`);
+        // IndexedDB has data — it's authoritative. Sync to localStorage as backup
+        // (safeLocalStorageSet will skip if too large).
         safeLocalStorageSet(name, idbValue);
+        // Debug: check AI field preservation
+        try {
+          const parsed = JSON.parse(idbValue);
+          const repos = parsed?.state?.repositories;
+          if (Array.isArray(repos)) {
+            const withAI = repos.filter((r: Record<string, unknown>) => r.ai_summary).length;
+            console.log(`[storage] IDB has ${repos.length} repos, ${withAI} with AI`);
+          }
+        } catch { /* ignore */ }
         return idbValue;
       }
 
-      console.log(`[storage] Both stores empty`);
+      // IndexedDB is empty — try localStorage (first-time migration or IDB was cleared)
+      const lsValue = safeLocalStorageGet(name);
+      if (lsValue !== null) {
+        // Migrate localStorage data to IndexedDB
+        await withTimeout(idbSet(name, lsValue));
+        return lsValue;
+      }
+
       return null;
     } catch (error) {
       console.warn('[storage] IndexedDB get failed, fallback to localStorage:', error);
@@ -178,11 +169,7 @@ export const indexedDBStorage: StateStorage = {
   setItem: async (name: string, value: string): Promise<void> => {
     if (typeof window === 'undefined') return;
 
-    // Write to localStorage FIRST (synchronous, guaranteed to complete immediately).
-    // This ensures data survives tab close even if the async IndexedDB write never starts.
-    safeLocalStorageSet(name, value);
-
-    // Then write to IndexedDB (async, large data friendly).
+    // Write to IndexedDB first (authoritative, no size limit).
     if (canUseIndexedDB()) {
       try {
         await withTimeout(idbSet(name, value));
@@ -190,6 +177,9 @@ export const indexedDBStorage: StateStorage = {
         console.warn('[storage] IndexedDB set failed:', error);
       }
     }
+
+    // Write to localStorage as backup (skipped if data > 4.5MB to prevent truncation).
+    safeLocalStorageSet(name, value);
   },
 
   removeItem: async (name: string): Promise<void> => {

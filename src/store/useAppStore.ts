@@ -56,12 +56,13 @@ const debouncedPersistStorage: PersistStorage<unknown> = {
         try {
           const str = JSON.stringify(latestValue);
           console.log(`[persist] FLUSH "${pendingName}": ${str.length}bytes`);
-          // Synchronous write to localStorage ensures data survives tab close
-          safeLocalStorageSet(pendingName, str);
-          // Fire-and-forget IndexedDB write
+          // Write to IndexedDB first (authoritative, no size limit).
+          // Use navigator.locks workaround: IndexedDB tx may not complete before
+          // page unloads, so write synchronously to localStorage as safety net.
           if (canUseIndexedDB()) {
             idbSet(pendingName, str).catch(() => {});
           }
+          safeLocalStorageSet(pendingName, str);
         } catch (e) {
           console.error('Failed to stringify state for persistence', e);
         }
