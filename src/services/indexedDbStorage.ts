@@ -21,7 +21,14 @@ const safeLocalStorageGet = (key: string): string | null => {
   }
 };
 
+// localStorage quota is ~5MB. Data beyond this is silently truncated in some browsers.
+const LOCAL_STORAGE_SIZE_LIMIT = 4.5 * 1024 * 1024; // 4.5MB safe threshold
+
 export const safeLocalStorageSet = (key: string, value: string): void => {
+  if (value.length > LOCAL_STORAGE_SIZE_LIMIT) {
+    console.warn(`[storage] Skipping localStorage write for "${key}": ${value.length} bytes exceeds ${LOCAL_STORAGE_SIZE_LIMIT} limit`);
+    return;
+  }
   try {
     window.localStorage.setItem(key, value);
   } catch {
@@ -130,19 +137,30 @@ export const indexedDBStorage: StateStorage = {
       const lsLen = lsValue?.length ?? 0;
       console.log(`[storage] getItem "${name}": IDB=${idbLen}bytes, LS=${lsLen}bytes`);
 
-      // localStorage is written synchronously (guaranteed latest), so prefer it
-      // when both stores have data. This handles stale IndexedDB data from before
-      // the write-order fix.
-      if (lsValue !== null) {
-        // Sync localStorage data to IndexedDB if they differ
+      // Both stores have data — prefer the larger one (localStorage has a ~5MB quota
+      // and silently truncates oversized writes, so the smaller value is likely incomplete).
+      if (idbValue !== null && lsValue !== null) {
         if (idbValue !== lsValue) {
-          console.log(`[storage] LS differs from IDB, syncing LS -> IDB`);
-          await withTimeout(idbSet(name, lsValue));
+          if (idbValue.length > lsValue.length) {
+            // IndexedDB has more complete data — sync it to localStorage
+            console.log(`[storage] IDB larger (${idbLen} > ${lsLen}), syncing IDB -> LS`);
+            safeLocalStorageSet(name, idbValue);
+            return idbValue;
+          } else {
+            // localStorage is newer/larger — sync it to IndexedDB
+            console.log(`[storage] LS larger (${lsLen} > ${idbLen}), syncing LS -> IDB`);
+            await withTimeout(idbSet(name, lsValue));
+            return lsValue;
+          }
         }
         return lsValue;
       }
 
-      // Only IndexedDB has data — return it and migrate to localStorage
+      // Only one store has data
+      if (lsValue !== null) {
+        return lsValue;
+      }
+
       if (idbValue !== null) {
         console.log(`[storage] Only IDB has data, migrating to LS`);
         safeLocalStorageSet(name, idbValue);
