@@ -25,7 +25,7 @@ import {
   SubscriptionChannel,
   defaultSubscriptionChannels
 } from '../types';
-import { indexedDBStorage } from '../services/indexedDbStorage';
+import { indexedDBStorage, safeLocalStorageSet, canUseIndexedDB, idbSet } from '../services/indexedDbStorage';
 import { PRESET_FILTERS } from '../constants/presetFilters';
 
 const BACKEND_SECRET_SESSION_KEY = 'github-stars-manager-backend-secret';
@@ -44,8 +44,36 @@ const debouncedPersistStorage: PersistStorage<unknown> = {
   },
   setItem: (() => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let pendingName: string | null = null;
     let latestValue: StorageValue<unknown> | null = null;
+
+    const flush = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (pendingName && latestValue) {
+        try {
+          const str = JSON.stringify(latestValue);
+          // Synchronous write to localStorage ensures data survives tab close
+          safeLocalStorageSet(pendingName, str);
+          // Fire-and-forget IndexedDB write
+          if (canUseIndexedDB()) {
+            idbSet(pendingName, str).catch(() => {});
+          }
+        } catch (e) {
+          console.error('Failed to stringify state for persistence', e);
+        }
+      }
+    };
+
+    // Flush pending writes immediately before page unloads
+    if (typeof window !== 'undefined') {
+      window.addEventListener('beforeunload', flush);
+    }
+
     return (name: string, value: StorageValue<unknown>) => {
+      pendingName = name;
       latestValue = value;
       if (timeoutId) clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
@@ -55,6 +83,7 @@ const debouncedPersistStorage: PersistStorage<unknown> = {
         } catch (e) {
           console.error('Failed to stringify state for persistence', e);
         }
+        timeoutId = null;
       }, 1000);
     };
   })(),

@@ -4,7 +4,7 @@ export const DB_NAME = 'github-stars-manager-db';
 const STORE_NAME = 'app_state';
 const DB_VERSION = 1;
 
-const canUseIndexedDB = () => typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined';
+export const canUseIndexedDB = () => typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined';
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs = 2000): Promise<T> => {
   return await Promise.race([
@@ -21,7 +21,7 @@ const safeLocalStorageGet = (key: string): string | null => {
   }
 };
 
-const safeLocalStorageSet = (key: string, value: string): void => {
+export const safeLocalStorageSet = (key: string, value: string): void => {
   try {
     window.localStorage.setItem(key, value);
   } catch {
@@ -70,7 +70,7 @@ const idbGet = async (key: string): Promise<string | null> => {
   });
 };
 
-const idbSet = async (key: string, value: string): Promise<void> => {
+export const idbSet = async (key: string, value: string): Promise<void> => {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
