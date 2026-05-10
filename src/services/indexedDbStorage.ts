@@ -136,18 +136,7 @@ export const indexedDBStorage: StateStorage = {
       const idbValue = await withTimeout(idbGet(name));
 
       if (idbValue !== null) {
-        // IndexedDB has data — it's authoritative. Sync to localStorage as backup
-        // (safeLocalStorageSet will skip if too large).
         safeLocalStorageSet(name, idbValue);
-        // Debug: check AI field preservation
-        try {
-          const parsed = JSON.parse(idbValue);
-          const repos = parsed?.state?.repositories;
-          if (Array.isArray(repos)) {
-            const withAI = repos.filter((r: Record<string, unknown>) => r.ai_summary).length;
-            console.log(`[storage] IDB has ${repos.length} repos, ${withAI} with AI`);
-          }
-        } catch { /* ignore */ }
         return idbValue;
       }
 

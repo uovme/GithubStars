@@ -55,10 +55,6 @@ const debouncedPersistStorage: PersistStorage<unknown> = {
       if (pendingName && latestValue) {
         try {
           const str = JSON.stringify(latestValue);
-          console.log(`[persist] FLUSH "${pendingName}": ${str.length}bytes`);
-          // Write to IndexedDB first (authoritative, no size limit).
-          // Use navigator.locks workaround: IndexedDB tx may not complete before
-          // page unloads, so write synchronously to localStorage as safety net.
           if (canUseIndexedDB()) {
             idbSet(pendingName, str).catch(() => {});
           }
@@ -77,14 +73,10 @@ const debouncedPersistStorage: PersistStorage<unknown> = {
     return (name: string, value: StorageValue<unknown>) => {
       pendingName = name;
       latestValue = value;
-      const stateVal = value as { state?: Record<string, unknown> };
-      const repoCount = Array.isArray(stateVal?.state?.repositories) ? stateVal.state.repositories.length : '?';
-      console.log(`[persist] setItem called: ${name}, repos=${repoCount}`);
       if (timeoutId) clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
         try {
           const str = JSON.stringify(latestValue);
-          console.log(`[persist] debounce fired: ${str.length}bytes`);
           indexedDBStorage.setItem(name, str);
         } catch (e) {
           console.error('Failed to stringify state for persistence', e);
@@ -336,9 +328,6 @@ const normalizePersistedState = (
   currentState: AppState & AppActions
 ): Partial<AppState & AppActions> => {
   const safePersisted = persisted ?? {};
-  const persistedRepoCount = Array.isArray(safePersisted.repositories) ? safePersisted.repositories.length : 0;
-  const persistedAI = Array.isArray(safePersisted.repositories) ? safePersisted.repositories.filter((r: Repository) => r.ai_summary).length : 0;
-  console.log(`[normalize] input: repos=${persistedRepoCount}, withAI=${persistedAI}, keys=${Object.keys(safePersisted).join(',')}`);
   const defaultDiscoveryChannelIds = new Set(defaultDiscoveryChannels.map((channel) => channel.id));
 
   const repositories = Array.isArray(safePersisted.repositories) ? safePersisted.repositories : [];
@@ -1640,28 +1629,11 @@ export const useAppStore = create<AppState & AppActions>()(
           persistedState as PersistedAppState | undefined,
           currentState as AppState & AppActions
         );
-
-        const reposWithAI = (normalized.repositories as Repository[] || []).filter(r => r.ai_summary).length;
-        console.log('Store rehydrated:', {
-          isAuthenticated: normalized.isAuthenticated,
-          repositoriesCount: normalized.repositories?.length || 0,
-          reposWithAI,
-          lastSync: normalized.lastSync,
-          language: normalized.language,
-          webdavConfigsCount: normalized.webdavConfigs?.length || 0,
-          customCategoriesCount: normalized.customCategories?.length || 0,
-        });
-
-        return {
-          ...currentState,
-          ...normalized,
-        };
+        return { ...currentState, ...normalized };
       },
       onRehydrateStorage: (state) => (_rehydratedState, error) => {
         if (error) {
           console.error('Store hydration failed', error);
-        } else {
-          console.log('Store hydration complete');
         }
         state.setHasHydrated(true);
       },
