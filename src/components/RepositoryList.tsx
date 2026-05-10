@@ -330,6 +330,8 @@ export const RepositoryList: React.FC<RepositoryListProps> = ({
     setAnalysisProgress({ current: 0, total: targetRepos.length });
     setShowDropdown(false);
     setIsPaused(false);
+    let hasAnalysisChanges = false;
+    let hasForcedAnalysisSync = false;
 
     // 创建优化器实例并保存到 ref
     optimizerRef.current = new AIAnalysisOptimizer({
@@ -352,6 +354,7 @@ export const RepositoryList: React.FC<RepositoryListProps> = ({
       let failedCount = 0;
 
       const handleResult = (result: AnalysisResult) => {
+        hasAnalysisChanges = true;
         if (result.success) {
           const resolvedCategory = resolveCategoryAssignment(
             result.repo,
@@ -399,6 +402,11 @@ export const RepositoryList: React.FC<RepositoryListProps> = ({
       const stats = optimizerRef.current!.getStats();
       console.log('AI Analysis Stats:', stats);
 
+      if (hasAnalysisChanges) {
+        await forceSyncToBackend();
+        hasForcedAnalysisSync = true;
+      }
+
       const completionMessage = shouldStopRef.current
         ? (language === 'zh'
             ? `AI分析已停止！成功: ${successCount}, 失败: ${failedCount}`
@@ -422,6 +430,9 @@ export const RepositoryList: React.FC<RepositoryListProps> = ({
       setLoading(false);
       setAnalysisProgress({ current: 0, total: 0 });
       setIsPaused(false);
+      if (hasAnalysisChanges && !hasForcedAnalysisSync) {
+        await forceSyncToBackend();
+      }
     }
   };
 

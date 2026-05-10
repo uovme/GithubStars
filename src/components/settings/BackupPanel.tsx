@@ -53,7 +53,7 @@ export const BackupPanel: React.FC<BackupPanelProps> = ({ t }) => {
       const webdavService = new WebDAVService(activeConfig);
 
       // 导出发现页面的AI分析结果
-      let discoveryAnalyses: Record<number, unknown> = {};
+      const discoveryAnalyses: Record<number, unknown> = {};
       try {
         const allAnalyses = await discoveryAnalysisStorage.loadAllAnalyses();
         allAnalyses.forEach((data, repoId) => {

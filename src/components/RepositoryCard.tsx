@@ -331,6 +331,7 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
       };
 
       updateRepository(updatedRepo);
+      await forceSyncToBackend();
 
       const successMessage = repository.analyzed_at
         ? (language === 'zh' ? 'AI重新分析完成！' : 'AI re-analysis completed!')
@@ -349,6 +350,7 @@ const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
         };
 
         updateRepository(failedRepo);
+        await forceSyncToBackend();
 
         toast(language === 'zh' ? 'AI分析失败，请检查AI配置和网络连接。' : 'AI analysis failed. Please check AI configuration and network connection.', 'error');
       }

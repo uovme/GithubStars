@@ -11,10 +11,12 @@ let _storeUnsubscribe: (() => void) | null = null;
 
 // Prevent overlapping pushes to backend
 let _isPushingToBackend = false;
+let _activePushPromise: Promise<void> | null = null;
 // Queue a push if one is requested while a pull is in-flight
 let _hasPendingPush = false;
 // Track unsynced local edits so backend polling does not overwrite them.
 let _hasPendingLocalChanges = false;
+let _localChangeVersion = 0;
 
 // Debounce timer for push-to-backend
 let _debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -222,24 +224,10 @@ export async function syncFromBackend(): Promise<void> {
   }
 }
 
-/**
- * Push current local state to backend.
- * Silent: errors logged to console only.
- */
-export async function syncToBackend(): Promise<void> {
-  if (!backend.isAvailable) return;
-  // If a pull is in-flight, queue this push for after pull completes
-  if (_isSyncingFromBackendActive) {
-    _hasPendingPush = true;
-    return;
-  }
-  if (_isSyncingFromBackend) return;
-  if (_isPushingToBackend) return;
-
-  _isPushingToBackend = true;
-  _hasPendingPush = false;
+async function pushCurrentStateToBackend(): Promise<void> {
   setRepositorySyncVisualState(true);
   try {
+    const pushVersion = _localChangeVersion;
     const state = useAppStore.getState();
 
     const results = await Promise.allSettled([
@@ -265,7 +253,12 @@ export async function syncToBackend(): Promise<void> {
       _hasPendingLocalChanges = true;
     } else {
       console.log('✅ Synced to backend');
-      _hasPendingLocalChanges = false;
+      if (_localChangeVersion === pushVersion) {
+        _hasPendingLocalChanges = false;
+      } else {
+        _hasPendingLocalChanges = true;
+        _hasPendingPush = true;
+      }
     }
 
     // Only update _lastHash for successfully synced slices
@@ -286,10 +279,51 @@ export async function syncToBackend(): Promise<void> {
     }
   } catch (err) {
     console.error('Failed to sync to backend:', err);
+    _hasPendingLocalChanges = true;
   } finally {
     setRepositorySyncVisualState(false);
-    _isPushingToBackend = false;
   }
+}
+
+/**
+ * Push current local state to backend.
+ * Silent: errors logged to console only.
+ */
+export async function syncToBackend(): Promise<void> {
+  if (!backend.isAvailable) return;
+  // If a pull is in-flight, queue this push for after pull completes
+  if (_isSyncingFromBackendActive) {
+    _hasPendingPush = true;
+    return;
+  }
+  if (_isSyncingFromBackend) return;
+  if (_isPushingToBackend) {
+    _hasPendingPush = true;
+    if (_activePushPromise) {
+      await _activePushPromise;
+    }
+    return;
+  }
+
+  _activePushPromise = (async () => {
+    _isPushingToBackend = true;
+    try {
+      do {
+        _hasPendingPush = false;
+        await pushCurrentStateToBackend();
+      } while (
+        _hasPendingPush &&
+        backend.isAvailable &&
+        !_isSyncingFromBackendActive &&
+        !_isSyncingFromBackend
+      );
+    } finally {
+      _isPushingToBackend = false;
+      _activePushPromise = null;
+    }
+  })();
+
+  await _activePushPromise;
 }
 
 /**
@@ -302,6 +336,7 @@ export async function forceSyncToBackend(): Promise<void> {
     _debounceTimer = null;
   }
   _hasPendingLocalChanges = true;
+  _hasPendingPush = true;
   await syncToBackend();
 }
 
@@ -349,6 +384,7 @@ export function startAutoSync(): () => void {
     if (!changed) return;
 
     _hasPendingLocalChanges = true;
+    _localChangeVersion += 1;
 
     // Debounce: wait 2s after last change before pushing
     if (_debounceTimer) {
