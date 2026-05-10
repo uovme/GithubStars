@@ -1,63 +1,165 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Star, GitFork, Eye, ExternalLink, Calendar, Tag, Bell, BellOff, Bot, Monitor, Smartphone, Globe, Terminal, Package, Edit3, BookOpen, Apple, Zap } from 'lucide-react';
-import { Category, Repository } from '../types';
-import { useAppStore, getAllCategories } from '../store/useAppStore';
-import { resolveCategoryAssignment } from '../utils/categoryUtils';
-import { GitHubApiService } from '../services/githubApi';
-import { AIService } from '../services/aiService';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { GripVertical, Star, StarOff, ExternalLink, Calendar, Bell, BellOff, Bot, Sparkles, Monitor, Smartphone, Globe, Terminal, Package, Edit3, BookOpen, Apple, Square, CheckSquare, Loader2 } from 'lucide-react';
+import { Repository, Category } from '../types';
+import { useAppStore } from '../store/useAppStore';
+import { getAICategory, getDefaultCategory } from '../utils/categoryUtils';
+import { analyzeRepository, createFailedAnalysisResult } from '../services/aiAnalysisHelper';
 import { forceSyncToBackend } from '../services/autoSync';
+import { GitHubApiService } from '../services/githubApi';
 import { formatDistanceToNow } from 'date-fns';
 import { RepositoryEditModal } from './RepositoryEditModal';
+import { ReadmeModal } from './ReadmeModal';
+import { shallow } from 'zustand/shallow';
+import { useDialog } from '../hooks/useDialog';
+
+// Selection-aware button component to centralize selectionMode disable logic
+interface SelectionAwareButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  selectionMode?: boolean;
+  children: React.ReactNode;
+  variant?: 'default' | 'ai' | 'subscribe' | 'edit' | 'unstar';
+}
+
+const SelectionAwareButton: React.FC<SelectionAwareButtonProps> = ({
+  selectionMode,
+  children,
+  variant = 'default',
+  className = '',
+  disabled,
+  onClick,
+  ...props
+}) => {
+  const baseClasses = 'p-2 rounded-lg transition-colors disabled:opacity-50';
+  const selectionClasses = selectionMode ? 'pointer-events-none' : '';
+
+  const variantClasses = {
+    default: '',
+    ai: '', // AI variant uses dynamic classes based on state
+    subscribe: '', // Subscribe variant uses dynamic classes based on state
+    edit: 'bg-gray-100 text-gray-700 hover:bg-gray-200 hover:text-gray-900 dark:bg-white/[0.04] dark:text-text-secondary dark:hover:bg-white/[0.08] dark:hover:text-text-primary',
+    unstar: 'flex items-center justify-center w-8 h-8 bg-gray-100 text-gray-700 hover:bg-gray-200 hover:text-gray-900 dark:bg-white/[0.04] dark:text-text-secondary dark:hover:bg-white/[0.08] dark:hover:text-text-primary disabled:cursor-not-allowed',
+  };
+
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    // 阻止事件冒泡，防止触发卡片的点击事件
+    e.stopPropagation();
+    onClick?.(e);
+  };
+
+  return (
+    <button
+      {...props}
+      onClick={handleClick}
+      disabled={disabled || selectionMode}
+      className={`${baseClasses} ${variantClasses[variant]} ${selectionClasses} ${className}`}
+    >
+      {children}
+    </button>
+  );
+};
 
 interface RepositoryCardProps {
   repository: Repository;
   showAISummary?: boolean;
-  searchQuery?: string; // 新增：用于高亮搜索关键词
+  searchQuery?: string;
+  isSelected?: boolean;
+  onSelect?: (id: number) => void;
+  selectionMode?: boolean;
+  isExitingSelection?: boolean;
+  allCategories: Category[];
 }
 
-export const RepositoryCard: React.FC<RepositoryCardProps> = ({
+const MAX_CACHE_SIZE = 500;
+
+const highlightCache = new Map<string, React.ReactNode>();
+
+const escapeRegExp = (string: string): string => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
+const RepositoryCardComponent: React.FC<RepositoryCardProps> = ({
   repository,
   showAISummary = true,
-  searchQuery = ''
+  searchQuery = '',
+  isSelected = false,
+  onSelect,
+  selectionMode = false,
+  isExitingSelection = false,
+  allCategories
 }) => {
+  const repoId = repository.id;
+  
   const {
-    releaseSubscriptions,
+    isSubscribed,
     toggleReleaseSubscription,
     githubToken,
-    aiConfigs,
     activeAIConfig,
-    isLoading,
-    setLoading,
+    analyzingRepositoryIds,
+    setAnalyzingRepository,
     language,
-    customCategories,
-    hiddenDefaultCategoryIds,
     updateRepository,
     deleteRepository
-  } = useAppStore();
+  } = useAppStore(
+    useCallback(
+      (state) => ({
+        isSubscribed: state.releaseSubscriptions.has(repoId),
+        toggleReleaseSubscription: state.toggleReleaseSubscription,
+        githubToken: state.githubToken,
+        activeAIConfig: state.activeAIConfig,
+        analyzingRepositoryIds: state.analyzingRepositoryIds,
+        setAnalyzingRepository: state.setAnalyzingRepository,
+        language: state.language,
+        updateRepository: state.updateRepository,
+        deleteRepository: state.deleteRepository
+      }),
+      [repoId]
+    ),
+    shallow
+  );
+
+  const isAnalyzing = analyzingRepositoryIds.has(repoId);
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+      setAnalyzingRepository(repoId, false);
+    };
+  }, [repoId, setAnalyzingRepository]);
+
+  const aiConfigs = useAppStore(state => state.aiConfigs);
+
+  const { toast, confirm } = useDialog();
 
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [readmeModalOpen, setReadmeModalOpen] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
   const [isTextTruncated, setIsTextTruncated] = useState(false);
   const [unstarring, setUnstarring] = useState(false);
+  const [showDragHint, setShowDragHint] = useState(false);
+  const dragHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const descriptionRef = useRef<HTMLParagraphElement>(null);
-  const allCategories = getAllCategories(customCategories, language, hiddenDefaultCategoryIds);
 
-  const isSubscribed = releaseSubscriptions.has(repository.id);
-
-  // 高亮搜索关键词的工具函数
-  const highlightSearchTerm = (text: string, searchTerm: string) => {
+  // 高亮搜索关键词的工具函数 - 使用缓存优化
+  const highlightSearchTerm = useCallback((text: string, searchTerm: string): React.ReactNode => {
     if (!searchTerm.trim() || !text) return text;
 
-    const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const cacheKey = `${text}::${searchTerm}`;
+    const cached = highlightCache.get(cacheKey);
+    if (cached) return cached;
+
+    const escapedTerm = escapeRegExp(searchTerm);
+    const regex = new RegExp(`(${escapedTerm})`, 'gi');
     const parts = text.split(regex);
 
-    return parts.map((part, index) => {
-      if (regex.test(part)) {
+    const result = parts.map((part, index) => {
+      if (part.toLowerCase() === searchTerm.toLowerCase()) {
         return (
           <mark
             key={index}
-            className="bg-yellow-200 dark:bg-yellow-800 text-yellow-900 dark:text-yellow-100 px-1 rounded"
+            className="bg-gray-100 dark:bg-white/[0.04] text-gray-700 dark:text-text-secondary px-1 rounded"
           >
             {part}
           </mark>
@@ -65,7 +167,14 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
       }
       return part;
     });
-  };
+
+    if (highlightCache.size > MAX_CACHE_SIZE) {
+      const firstKey = highlightCache.keys().next().value;
+      if (firstKey) highlightCache.delete(firstKey);
+    }
+    highlightCache.set(cacheKey, result);
+    return result;
+  }, []);
 
   // Check if text is actually truncated by comparing scroll height with client height
   useEffect(() => {
@@ -82,7 +191,12 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
 
     // Also check on window resize
     window.addEventListener('resize', checkTruncation);
-    return () => window.removeEventListener('resize', checkTruncation);
+    return () => {
+      window.removeEventListener('resize', checkTruncation);
+      if (dragHintTimeoutRef.current) {
+        clearTimeout(dragHintTimeoutRef.current);
+      }
+    };
   }, [repository, showAISummary]);
 
   const formatNumber = (num: number) => {
@@ -91,122 +205,129 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
     return num.toString();
   };
 
-  const getLanguageColor = (language: string | null) => {
-    const colors = {
-      JavaScript: '#f1e05a',
-      TypeScript: '#3178c6',
-      Python: '#3572A5',
-      Java: '#b07219',
-      'C++': '#f34b7d',
-      C: '#555555',
-      'C#': '#239120',
-      Go: '#00ADD8',
-      Rust: '#dea584',
-      PHP: '#4F5D95',
-      Ruby: '#701516',
-      Swift: '#fa7343',
-      Kotlin: '#A97BFF',
-      Dart: '#00B4AB',
-      Shell: '#89e051',
-      HTML: '#e34c26',
-      CSS: '#1572B6',
-      Vue: '#4FC08D',
-      React: '#61DAFB',
-    };
-    return colors[language as keyof typeof colors] || '#6b7280';
-  };
+  // 缓存语言颜色映射
+  const languageColors = useMemo(() => ({
+    JavaScript: '#f1e05a',
+    TypeScript: '#3178c6',
+    Python: '#3572A5',
+    Java: '#b07219',
+    'C++': '#f34b7d',
+    C: '#555555',
+    'C#': '#239120',
+    Go: '#00ADD8',
+    Rust: '#dea584',
+    PHP: '#4F5D95',
+    Ruby: '#701516',
+    Swift: '#fa7343',
+    Kotlin: '#A97BFF',
+    Dart: '#00B4AB',
+    Shell: '#89e051',
+    HTML: '#e34c26',
+    CSS: '#1572B6',
+    Vue: '#4FC08D',
+    React: '#61DAFB',
+  }), []);
 
-  const getPlatformIcon = (platform: string) => {
+  const getLanguageColor = useCallback((language: string | null) => {
+    return languageColors[language as keyof typeof languageColors] || '#6b7280';
+  }, [languageColors]);
+
+  // 缓存平台图标映射
+  const platformIconMap = useMemo(() => ({
+    mac: Apple,
+    macos: Apple,
+    ios: Apple,
+    windows: Monitor,
+    win: Monitor,
+    linux: Terminal,
+    android: Smartphone,
+    web: Globe,
+    cli: Terminal,
+    docker: Package,
+  }), []);
+
+  const getPlatformIcon = useCallback((platform: string) => {
     const platformLower = platform.toLowerCase();
+    return platformIconMap[platformLower as keyof typeof platformIconMap] || Monitor;
+  }, [platformIconMap]);
 
-    switch (platformLower) {
-      case 'mac':
-      case 'macos':
-      case 'ios':
-        return Apple;
-      case 'windows':
-      case 'win':
-        return Monitor; // 使用 Monitor 代表 Windows
-      case 'linux':
-        return Terminal; // 使用 Terminal 代表 Linux
-      case 'android':
-        return Smartphone;
-      case 'web':
-        return Globe;
-      case 'cli':
-        return Terminal;
-      case 'docker':
-        return Package;
-      default:
-        return Monitor; // 默认使用 Monitor
-    }
-  };
+  // 缓存平台显示名称映射
+  const platformNameMap = useMemo(() => ({
+    mac: 'macOS',
+    macos: 'macOS',
+    windows: 'Windows',
+    win: 'Windows',
+    linux: 'Linux',
+    ios: 'iOS',
+    android: 'Android',
+    web: 'Web',
+    cli: 'CLI',
+    docker: 'Docker',
+  }), []);
 
-  const getPlatformDisplayName = (platform: string) => {
+  const getPlatformDisplayName = useCallback((platform: string) => {
     const platformLower = platform.toLowerCase();
-    const nameMap: Record<string, string> = {
-      mac: 'macOS',
-      macos: 'macOS',
-      windows: 'Windows',
-      win: 'Windows',
-      linux: 'Linux',
-      ios: 'iOS',
-      android: 'Android',
-      web: 'Web',
-      cli: 'CLI',
-      docker: 'Docker',
-    };
-    return nameMap[platformLower] || platform;
-  };
+    return platformNameMap[platformLower as keyof typeof platformNameMap] || platform;
+  }, [platformNameMap]);
 
   const handleAIAnalyze = async () => {
     if (!githubToken) {
-      alert('GitHub token not found. Please login again.');
+      toast(t('GitHub token 未找到，请重新登录。', 'GitHub token not found. Please login again.'), 'error');
       return;
     }
 
     const activeConfig = aiConfigs.find(config => config.id === activeAIConfig);
     if (!activeConfig) {
-      alert(language === 'zh' ? '请先在设置中配置AI服务。' : 'Please configure AI service in settings first.');
+      toast(t('请先在设置中配置AI服务。', 'Please configure AI service in settings first.'), 'error');
       return;
     }
 
-    // 如果已经分析过，询问用户是否要重新分析
+    if (activeConfig.apiKeyStatus === 'decrypt_failed' || activeConfig.apiKeyStatus === 'empty') {
+      toast(t('AI服务的API密钥无法解密或为空，请在设置中重新输入并保存该配置。', 'The AI service API key could not be decrypted or is empty. Please re-enter and save the configuration in settings.'), 'error');
+      return;
+    }
+
+    if (!activeConfig.baseUrl || !activeConfig.apiKey || !activeConfig.model) {
+      toast(t('AI服务配置不完整，请检查API端点、密钥和模型名称。', 'AI service configuration is incomplete. Please check the API endpoint, key, and model name.'), 'error');
+      return;
+    }
+
     if (repository.analyzed_at) {
       const confirmMessage = language === 'zh'
         ? `此仓库已于 ${new Date(repository.analyzed_at).toLocaleString()} 进行过AI分析。\n\n是否要重新分析？这将覆盖现有的分析结果。`
         : `This repository was analyzed on ${new Date(repository.analyzed_at).toLocaleString()}.\n\nDo you want to re-analyze? This will overwrite the existing analysis results.`;
 
-      if (!confirm(confirmMessage)) {
+      if (!await confirm(t('重新分析确认', 'Re-analyze Confirmation'), confirmMessage, { type: 'warning' })) {
         return;
       }
     }
 
-    setLoading(true);
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    setAnalyzingRepository(repoId, true);
     try {
-      const githubApi = new GitHubApiService(githubToken);
-      const aiService = new AIService(activeConfig, language);
+      const result = await analyzeRepository({
+        repository,
+        githubToken,
+        aiConfig: activeConfig,
+        language,
+        categories: allCategories,
+        signal: controller.signal,
+      });
 
-      // 获取README内容
-      const [owner, name] = repository.full_name.split('/');
-      const readmeContent = await githubApi.getRepositoryReadme(owner, name);
+      if (controller.signal.aborted) return;
 
-      // 获取可用分类名称列表
-      const categoryNames = allCategories.filter(cat => cat.id !== 'all').map(cat => cat.name);
-
-      // AI分析
-      const analysis = await aiService.analyzeRepository(repository, readmeContent, categoryNames);
-      const resolvedCategory = resolveCategoryAssignment(repository, analysis.tags, allCategories);
-
-      // 更新仓库信息
       const updatedRepo = {
         ...repository,
-        ai_summary: analysis.summary,
-        ai_tags: analysis.tags,
-        ai_platforms: analysis.platforms,
-        custom_category: resolvedCategory,
-        analyzed_at: new Date().toISOString(),
-        analysis_failed: false // 分析成功，清除失败标记
+        ai_summary: result.summary,
+        ai_tags: result.tags,
+        ai_platforms: result.platforms,
+        custom_category: result.custom_category,
+        category_locked: result.category_locked,
+        analyzed_at: result.analyzed_at,
+        analysis_failed: result.analysis_failed
       };
 
       updateRepository(updatedRepo);
@@ -215,22 +336,26 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
         ? (language === 'zh' ? 'AI重新分析完成！' : 'AI re-analysis completed!')
         : (language === 'zh' ? 'AI分析完成！' : 'AI analysis completed!');
 
-      alert(successMessage);
+      toast(successMessage, 'success');
     } catch (error) {
-      console.error('AI analysis failed:', error);
-      
-      // 标记为分析失败
-      const failedRepo = {
-        ...repository,
-        analyzed_at: new Date().toISOString(),
-        analysis_failed: true
-      };
-      
-      updateRepository(failedRepo);
-      
-      alert(language === 'zh' ? 'AI分析失败，请检查AI配置和网络连接。' : 'AI analysis failed. Please check AI configuration and network connection.');
+      if (!controller.signal.aborted) {
+        console.error('AI analysis failed:', error);
+
+        const failedResult = createFailedAnalysisResult();
+        const failedRepo = {
+          ...repository,
+          analyzed_at: failedResult.analyzed_at,
+          analysis_failed: failedResult.analysis_failed
+        };
+
+        updateRepository(failedRepo);
+
+        toast(language === 'zh' ? 'AI分析失败，请检查AI配置和网络连接。' : 'AI analysis failed. Please check AI configuration and network connection.', 'error');
+      }
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) {
+        setAnalyzingRepository(repoId, false);
+      }
     }
   };
 
@@ -244,64 +369,149 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
     return `https://zread.ai/${fullName}`;
   };
 
-  // 根据切换状态决定显示的内容
-  const getDisplayContent = () => {
-    if (repository.custom_description) {
-      return {
-        content: repository.custom_description,
-        isCustom: true
-      };
-    } else if (showAISummary && repository.analysis_failed) {
-      return {
-        content: repository.description || (language === 'zh' ? '暂无描述' : 'No description available'),
-        isAI: false,
-        isFailed: true
-      };
+  // 使用 useMemo 缓存显示内容计算
+  // 方案一：分离内容与状态指示，同时显示多个状态标签
+  const displayContent = useMemo(() => {
+    // 确定显示的内容（按优先级）
+    // custom_description === '' 表示用户明确清空，应显示为空
+    // custom_description === undefined 表示无自定义，回退到AI/原始
+    let content: string;
+    let contentSource: 'custom' | 'ai' | 'original' | 'empty';
+
+    // 检查是否有明确的自定义描述（包括空标记）
+    const hasExplicitCustomDesc = repository.custom_description !== undefined;
+    const isExplicitlyCleared = repository.custom_description === '';
+
+    if (isExplicitlyCleared) {
+      // 用户明确清空描述
+      content = language === 'zh' ? '（无描述）' : '(No description)';
+      contentSource = 'empty';
+    } else if (repository.custom_description) {
+      // 有自定义描述
+      content = repository.custom_description;
+      contentSource = 'custom';
     } else if (showAISummary && repository.ai_summary) {
-      return {
-        content: repository.ai_summary,
-        isAI: true
-      };
+      // 显示AI总结
+      content = repository.ai_summary;
+      contentSource = 'ai';
     } else if (repository.description) {
-      return {
-        content: repository.description,
-        isAI: false
-      };
+      // 显示原始描述
+      content = repository.description;
+      contentSource = 'original';
     } else {
-      return {
-        content: language === 'zh' ? '暂无描述' : 'No description available',
-        isAI: false
-      };
+      // 无可用描述
+      content = language === 'zh' ? '暂无描述' : 'No description available';
+      contentSource = 'empty';
     }
-  };
 
-  const displayContent = getDisplayContent();
+    if (showAISummary && repository.analysis_failed) {
+      if (isExplicitlyCleared) {
+        content = language === 'zh' ? '（无描述）' : '(No description)';
+        contentSource = 'empty';
+      } else if (repository.custom_description) {
+        content = repository.custom_description;
+        contentSource = 'custom';
+      } else if (repository.description) {
+        content = repository.description;
+        contentSource = 'original';
+      } else {
+        content = language === 'zh' ? '暂无描述' : 'No description available';
+        contentSource = 'empty';
+      }
+    }
 
-  // 获取显示的标签
-  const getDisplayTags = () => {
+    // 判断仓库是否有任何自定义行为（与筛选器逻辑一致）
+    // 描述：有自定义描述标记（包括明确清空），且内容与AI/原始不同
+    const hasCustomDesc = repository.custom_description !== undefined;
+    const repoDesc = (repository.description || '').trim();
+    const aiDesc = (repository.ai_summary || '').trim();
+    const customDesc = (repository.custom_description || '').trim();
+    const isDescEdited = hasCustomDesc &&
+      (customDesc === '' || (customDesc !== repoDesc && customDesc !== aiDesc));
+
+    // 标签：有自定义标签标记（包括明确清空），且内容与AI/Topics不同
+    const hasCustomTags = repository.custom_tags !== undefined;
+    const aiTags = repository.ai_tags || [];
+    const topics = repository.topics || [];
+    const customTags = repository.custom_tags || [];
+    const isTagsEdited = hasCustomTags &&
+      (customTags.length === 0 || (
+        JSON.stringify([...customTags].sort()) !== JSON.stringify([...aiTags].sort()) &&
+        JSON.stringify([...customTags].sort()) !== JSON.stringify([...topics].sort())
+      ));
+
+    // 分类：有自定义分类标记（包括明确清空），且与AI/默认不一致
+    const aiCat = getAICategory(repository, allCategories);
+    const defaultCat = getDefaultCategory(repository, allCategories);
+    const customCat = repository.custom_category;
+    const isCategoryEdited = customCat !== undefined &&
+      (customCat === '' || (customCat !== aiCat && customCat !== defaultCat));
+
+    // 任意一个为true则显示已自定义（注意：分类锁定不算自定义）
+    const isCustomized = isDescEdited || isTagsEdited || isCategoryEdited;
+
+    return {
+      content,
+      contentSource,
+      hasCustomDescription: hasExplicitCustomDesc,
+      hasAISummary: !!repository.ai_summary,
+      isAnalysisFailed: !!repository.analysis_failed,
+      isAnalyzed: !!repository.analyzed_at,
+      analyzedAt: repository.analyzed_at,
+      isExplicitlyCleared,
+      isCustomized
+    };
+  }, [repository.custom_description, repository.description, repository.ai_summary, repository.analysis_failed, repository.analyzed_at, repository.custom_tags, repository.ai_tags, repository.topics, repository.custom_category, repository.category_locked, showAISummary, language, allCategories]);
+
+  // 使用 useMemo 缓存标签计算
+  // 逻辑：优先显示自定义标签，如果没有则按AI分析状态显示AI标签或Topics
+  const displayTags = useMemo(() => {
+    // 检查是否有明确的自定义标签设置（包括空数组）
+    const hasExplicitCustomTags = repository.custom_tags !== undefined;
+    const isExplicitlyCleared = hasExplicitCustomTags && repository.custom_tags!.length === 0;
+
+    // 优先显示自定义标签（如果非空）
     if (repository.custom_tags && repository.custom_tags.length > 0) {
-      return { tags: repository.custom_tags, isCustom: true };
-    } else if (repository.ai_tags && repository.ai_tags.length > 0) {
-      return { tags: repository.ai_tags, isCustom: false };
+      return {
+        tags: repository.custom_tags.map(tag => ({ tag, source: 'custom' as const })),
+        tagType: 'custom' as const,
+        hasExplicitCustomTags,
+        isExplicitlyCleared
+      };
+    }
+
+    // 如果用户明确清空标签，显示空状态
+    if (isExplicitlyCleared) {
+      return {
+        tags: [],
+        tagType: 'empty' as const,
+        hasExplicitCustomTags,
+        isExplicitlyCleared
+      };
+    }
+
+    // 没有自定义标签时，按AI分析状态显示
+    const isAnalyzed = !!repository.analyzed_at && !repository.analysis_failed;
+    if (isAnalyzed && repository.ai_tags && repository.ai_tags.length > 0) {
+      return {
+        tags: repository.ai_tags.map(tag => ({ tag, source: 'ai' as const })),
+        tagType: 'ai' as const,
+        hasExplicitCustomTags,
+        isExplicitlyCleared
+      };
     } else {
-      return { tags: repository.topics || [], isCustom: false };
+      const topics = repository.topics || [];
+      return {
+        tags: topics.map(tag => ({ tag, source: 'topic' as const })),
+        tagType: 'topic' as const,
+        hasExplicitCustomTags,
+        isExplicitlyCleared
+      };
     }
-  };
+  }, [repository.custom_tags, repository.analyzed_at, repository.analysis_failed, repository.ai_tags, repository.topics]);
 
-  const displayTags = getDisplayTags();
-
-  // 获取显示的分类
-  const getDisplayCategory = () => {
-    if (repository.custom_category) {
-      return repository.custom_category;
-    }
-    return null;
-  };
-
-  const displayCategory = getDisplayCategory();
-
-  // 获取AI分析按钮的提示文本
-  const getAIButtonTitle = () => {
+  // 使用 useMemo 缓存AI分析按钮提示文本
+  const aiButtonTitle = useMemo(() => {
     if (repository.analysis_failed) {
       const analyzeTime = new Date(repository.analyzed_at!).toLocaleString();
       return language === 'zh'
@@ -315,13 +525,13 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
     } else {
       return language === 'zh' ? 'AI分析此仓库' : 'Analyze with AI';
     }
-  };
+  }, [repository.analysis_failed, repository.analyzed_at, language]);
 
   const t = (zh: string, en: string) => language === 'zh' ? zh : en;
 
   const handleUnstar = async () => {
     if (!githubToken) {
-      alert(t('未找到 GitHub Token，请重新登录。', 'GitHub token not found. Please login again.'));
+      toast(t('未找到 GitHub Token，请重新登录。', 'GitHub token not found. Please login again.'), 'error');
       return;
     }
 
@@ -329,7 +539,7 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
       ? `确定要取消 Star "${repository.full_name}" 吗？\n\n这将会从您的 GitHub 收藏中移除该仓库。`
       : `Are you sure you want to unstar "${repository.full_name}"?\n\nThis will remove the repository from your GitHub stars.`;
 
-    if (!confirm(confirmMessage)) {
+    if (!await confirm(t('取消Star确认', 'Unstar Confirmation'), confirmMessage, { type: 'danger', confirmText: t('取消Star', 'Unstar') })) {
       return;
     }
 
@@ -343,90 +553,300 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
       const successMessage = language === 'zh'
         ? '已成功取消 Star'
         : 'Successfully unstarred';
-      alert(successMessage);
+      toast(successMessage, 'success');
     } catch (error) {
       console.error('Failed to unstar repository:', error);
       const errorMessage = language === 'zh'
         ? '取消 Star 失败，请检查网络连接或重新登录。'
         : 'Failed to unstar repository. Please check your network connection or login again.';
-      alert(errorMessage);
+      toast(errorMessage, 'error');
     } finally {
       setUnstarring(false);
     }
   };
 
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const isDraggingRef = useRef(false);
+  const dragHandleRef = useRef<HTMLDivElement>(null);
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const isTouchDraggingRef = useRef(false);
+
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
     event.dataTransfer.setData('application/x-gsm-repository-id', String(repository.id));
     event.dataTransfer.effectAllowed = 'move';
+
+    // 设置拖拽图片为整个卡片
+    const cardElement = event.currentTarget.closest('.repository-card') as HTMLElement;
+    if (cardElement) {
+      const rect = cardElement.getBoundingClientRect();
+      // offsetX/Y 使拖拽图片中心对准鼠标位置
+      event.dataTransfer.setDragImage(cardElement, event.clientX - rect.left, event.clientY - rect.top);
+    }
+
+    event.stopPropagation();
+    isDraggingRef.current = true;
+    // 标记正在拖拽，防止触发卡片点击
+    (window as Window & { __isDraggingRepo?: boolean }).__isDraggingRepo = true;
   };
+
+  const handleDragEnd = () => {
+    isDraggingRef.current = false;
+    // 拖拽结束后延迟清除标记，确保 click 事件能检测到拖拽状态
+    setTimeout(() => {
+      (window as Window & { __isDraggingRepo?: boolean }).__isDraggingRepo = false;
+    }, 200);
+  };
+
+  const handleDragHandleMouseDown = (event: React.MouseEvent) => {
+    dragStartPosRef.current = { x: event.clientX, y: event.clientY };
+    event.stopPropagation();
+  };
+
+  const handleDragHandleClick = (event: React.MouseEvent) => {
+    // 如果发生了拖拽，阻止点击事件
+    if (isDraggingRef.current || (window as Window & { __isDraggingRepo?: boolean }).__isDraggingRepo) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+
+  // 移动端触摸拖拽处理
+  const handleTouchStart = (event: React.TouchEvent) => {
+    const touch = event.touches[0];
+    touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+    isTouchDraggingRef.current = false;
+  };
+
+  const handleTouchMove = (event: React.TouchEvent) => {
+    if (!touchStartPosRef.current) return;
+    
+    const touch = event.touches[0];
+    const deltaX = Math.abs(touch.clientX - touchStartPosRef.current.x);
+    const deltaY = Math.abs(touch.clientY - touchStartPosRef.current.y);
+    
+    // 如果移动距离超过阈值，认为是拖拽
+    if (deltaX > 10 || deltaY > 10) {
+      isTouchDraggingRef.current = true;
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (isTouchDraggingRef.current) {
+      // 如果发生了拖拽，阻止后续点击事件
+      (window as Window & { __isDraggingRepo?: boolean }).__isDraggingRepo = true;
+      setTimeout(() => {
+        (window as Window & { __isDraggingRepo?: boolean }).__isDraggingRepo = false;
+      }, 200);
+    }
+    touchStartPosRef.current = null;
+    isTouchDraggingRef.current = false;
+  };
+
+  // 使用 ref 记录当前选中状态，避免闭包问题
+  const isSelectedRef = useRef(isSelected);
+  useEffect(() => {
+    isSelectedRef.current = isSelected;
+  }, [isSelected]);
+
+  // 使用 ref 来跟踪是否已经处理了点击
+  const isProcessingClickRef = useRef(false);
+
+  // 使用 useCallback 优化事件处理函数
+  const handleCardClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    // 防止重复处理
+    if (isProcessingClickRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    // 如果正在拖拽，不处理点击
+    if (isDraggingRef.current || (window as Window & { __isDraggingRepo?: boolean }).__isDraggingRepo) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    // 检查点击目标是否是交互元素或其子元素
+    const target = event.target as HTMLElement;
+    // 排除卡片本身的 role="button"，只检查子元素的交互元素
+    const isInteractiveElement = target.closest('button, a, input, textarea, select, [draggable="true"]');
+
+    // 如果点击的是交互元素，不处理
+    if (isInteractiveElement) return;
+
+    // 如果选择模式下，点击卡片切换选择状态
+    if (selectionMode && onSelect) {
+      // 阻止默认行为以防止焦点改变导致页面滚动
+      event.preventDefault();
+      event.stopPropagation();
+      // 设置标志防止重复处理
+      isProcessingClickRef.current = true;
+      // 立即执行选择操作
+      onSelect(repository.id);
+      // 重置标志
+      setTimeout(() => {
+        isProcessingClickRef.current = false;
+      }, 50);
+      return;
+    }
+
+    // 打开 README 模态框
+    setReadmeModalOpen(true);
+  }, [selectionMode, onSelect, repository.id]);
+
+  // 处理鼠标按下事件，阻止焦点变化导致页面滚动
+  const handleMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    // 在选择模式下，阻止默认行为以防止焦点变化
+    if (selectionMode && onSelect) {
+      event.preventDefault();
+    }
+  }, [selectionMode, onSelect]);
+
+  // 处理键盘事件，使卡片可键盘操作
+  // 当编辑模态框或README模态框打开时，禁用卡片键盘事件
+  const isModalOpen = editModalOpen || readmeModalOpen;
+  
+  const handleCardKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    // 如果任何模态框打开，不处理键盘事件
+    if (isModalOpen) return;
+    
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (selectionMode && onSelect) {
+        onSelect(repository.id);
+      } else {
+        setReadmeModalOpen(true);
+      }
+    }
+  }, [selectionMode, onSelect, repository.id, isModalOpen]);
+
+  // 使用 useMemo 缓存卡片类名，避免重复计算
+  const cardClassName = useMemo(() => {
+    const baseClasses = 'repository-card group bg-white dark:bg-panel-dark rounded-xl border border-black/[0.06] dark:border-white/[0.04] p-6 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 hover:border-black/10 dark:hover:border-white/10 flex flex-col h-full cursor-pointer select-none';
+    const selectedClasses = isSelected
+      ? 'shadow-[0_0_0_2px_theme(colors.blue.500)] dark:shadow-[0_0_0_2px_theme(colors.brand.violet)] bg-gray-100 dark:bg-white/[0.04] dark:bg-brand-indigo/10'
+      : '';
+    const exitingClasses = isExitingSelection && isSelected ? 'animate-selection-exit' : '';
+    return `${baseClasses} ${selectedClasses} ${exitingClasses}`.trim();
+  }, [isSelected, isExitingSelection]);
 
   return (
     <div
-      className="repository-card bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 hover:shadow-lg transition-all duration-200 hover:border-blue-300 dark:hover:border-blue-600 flex flex-col h-full"
-      draggable
-      onDragStart={handleDragStart}
+      className={cardClassName}
+      onClick={handleCardClick}
+      onMouseDown={handleMouseDown}
+      onKeyDown={handleCardKeyDown}
+      tabIndex={isModalOpen ? -1 : 0}
+      role="button"
+      aria-label={`${repository.full_name} - ${repository.description || 'No description'}`}
+      data-selection-mode={selectionMode}
+      aria-disabled={isModalOpen}
     >
       {/* Header - Repository Info */}
-      <div className="flex items-center space-x-3 mb-3">
+      <div className="flex items-start space-x-3 mb-3">
         <img
           src={repository.owner.avatar_url}
           alt={repository.owner.login}
           className="w-8 h-8 rounded-full flex-shrink-0"
         />
         <div className="min-w-0 flex-1">
-          <h3 className="font-semibold text-gray-900 dark:text-white truncate">
+          <h3 className="font-semibold text-gray-900 dark:text-text-primary truncate">
             {highlightSearchTerm(repository.name, searchQuery)}
           </h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+          <p className="text-sm text-gray-500 dark:text-text-secondary truncate">
             {repository.owner.login}
           </p>
         </div>
+        
+        {/* 拖拽按钮 - 右上角 - 手机和平板端隐藏 */}
+        {!selectionMode && (
+          <div className="hidden lg:block relative flex-shrink-0 mt-[-4px] opacity-0 hover:opacity-100 transition-opacity duration-200 group-hover:opacity-100">
+            <div
+              ref={dragHandleRef}
+              draggable
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onMouseDown={handleDragHandleMouseDown}
+              onClick={(e) => {
+                handleDragHandleClick(e);
+                // 显示弱气泡提示
+                setShowDragHint(true);
+                if (dragHintTimeoutRef.current) {
+                  clearTimeout(dragHintTimeoutRef.current);
+                }
+                dragHintTimeoutRef.current = setTimeout(() => {
+                  setShowDragHint(false);
+                }, 2000);
+              }}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              className="flex items-center justify-center w-8 h-8 rounded-lg cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-700 dark:text-text-tertiary dark:hover:text-gray-900 hover:bg-light-surface dark:hover:bg-white/5 transition-all duration-200 touch-manipulation"
+              title={language === 'zh' ? '拖拽我到侧栏以分类' : 'Drag me to sidebar to categorize'}
+            >
+              <GripVertical className="w-4 h-4" />
+            </div>
+            {/* 弱气泡提示 */}
+            {showDragHint && (
+              <div className="absolute top-full right-0 mt-2 px-3 py-1.5 bg-gray-800 dark:bg-surface-3 text-white dark:text-text-primary text-xs rounded-lg shadow-dialog dark:border dark:border-white/[0.04] whitespace-nowrap z-50 animate-fade-in">
+                {language === 'zh' ? '拖拽我到左侧分类栏' : 'Drag me to left sidebar'}
+                {/* 气泡箭头 */}
+                <div className="absolute bottom-full right-3 w-0 h-0 border-l-4 border-r-4 border-b-4 border-l-transparent border-r-transparent border-b-gray-800 dark:border-b-surface-3"></div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Action Buttons Row - Left and Right Aligned */}
       <div className="flex items-center justify-between mb-4">
         {/* Left side: AI Analysis, Release Subscription, and Edit */}
-        <div className="flex items-center space-x-2">
-          <button
+        <div className="flex items-center gap-1.5">
+          <SelectionAwareButton
             onClick={handleAIAnalyze}
-            disabled={isLoading}
-            className={`p-2 rounded-lg transition-colors ${
+            disabled={isAnalyzing}
+            selectionMode={selectionMode}
+            className={`${
               repository.analysis_failed
-                ? 'bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800'
-                : repository.analyzed_at
-                  ? 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800'
-                  : 'bg-purple-100 text-purple-600 dark:bg-purple-900 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-800'
-              } disabled:opacity-50`}
-            title={getAIButtonTitle()}
+              ? 'bg-gray-100 text-gray-700 hover:bg-gray-200 hover:text-gray-900 dark:bg-white/[0.04] dark:text-text-secondary dark:hover:bg-white/[0.08] dark:hover:text-text-primary'
+              : repository.analyzed_at
+                ? 'bg-gray-100 text-gray-700 hover:bg-gray-200 hover:text-gray-900 dark:bg-white/[0.04] dark:text-text-secondary dark:hover:bg-white/[0.08] dark:hover:text-text-primary'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 hover:text-gray-900 dark:bg-white/[0.04] dark:text-text-secondary dark:hover:bg-white/[0.08] dark:hover:text-text-primary'
+            }`}
+            title={aiButtonTitle}
           >
-            <Bot className="w-4 h-4" />
-          </button>
-          <button
+            {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
+          </SelectionAwareButton>
+          <SelectionAwareButton
             onClick={() => toggleReleaseSubscription(repository.id)}
-            className={`p-2 rounded-lg transition-colors ${isSubscribed
-              ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-400'
-              : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
-              }`}
-            title={isSubscribed ? 'Unsubscribe from releases' : 'Subscribe to releases'}
+            selectionMode={selectionMode}
+            className={`${isSubscribed
+              ? 'bg-brand-indigo text-white shadow-sm dark:bg-brand-indigo/80 dark:text-white'
+              : 'bg-gray-100 text-gray-700 dark:bg-white/[0.04] dark:text-text-secondary hover:bg-gray-200 hover:text-gray-900 dark:hover:bg-white/[0.08] dark:hover:text-text-primary'
+            }`}
+            title={isSubscribed ? (language === 'zh' ? '取消订阅发布' : 'Unsubscribe from releases') : (language === 'zh' ? '订阅发布' : 'Subscribe to releases')}
           >
             {isSubscribed ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
-          </button>
-          <button
+          </SelectionAwareButton>
+          <SelectionAwareButton
             onClick={() => setEditModalOpen(true)}
-            className="p-2 rounded-lg bg-orange-100 text-orange-600 dark:bg-orange-900 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-800 transition-colors"
+            selectionMode={selectionMode}
+            variant="edit"
             title={language === 'zh' ? '编辑仓库信息' : 'Edit repository info'}
           >
             <Edit3 className="w-4 h-4" />
-          </button>
+          </SelectionAwareButton>
         </div>
 
         {/* Right side: Zread/DeepWiki, GitHub Links, and Unstar */}
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-1.5">
           <a
             href={language === 'zh' ? getZreadUrl(repository.full_name) : getDeepWikiUrl(repository.html_url)}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 dark:bg-indigo-900 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-800 transition-colors"
+            onClick={(e) => selectionMode && e.preventDefault()}
+            className={`flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 dark:bg-white/[0.04] text-gray-700 dark:text-text-secondary dark:bg-brand-indigo/20 dark:text-brand-violet hover:bg-gray-100 dark:bg-white/[0.04] dark:hover:bg-brand-indigo/30 transition-colors ${selectionMode ? 'pointer-events-none opacity-50' : ''}`}
             title={language === 'zh' ? '在Zread中查看' : 'View on DeepWiki'}
           >
             <BookOpen className="w-4 h-4" />
@@ -435,109 +855,95 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
             href={repository.html_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-            title="View on GitHub"
+            onClick={(e) => selectionMode && e.preventDefault()}
+            className={`flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 text-gray-700 dark:bg-white/[0.04] dark:text-text-secondary hover:bg-gray-200 hover:text-gray-900 dark:hover:bg-white/[0.08] dark:hover:text-text-primary transition-colors ${selectionMode ? 'pointer-events-none opacity-50' : ''}`}
+            title={language === 'zh' ? '在GitHub上查看' : 'View on GitHub'}
           >
             <ExternalLink className="w-4 h-4" />
           </a>
-          <button
+          <SelectionAwareButton
             onClick={handleUnstar}
             disabled={unstarring}
-            className="flex items-center justify-center w-8 h-8 rounded-lg bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            selectionMode={selectionMode}
+            variant="unstar"
             title={language === 'zh' ? '取消 Star' : 'Unstar'}
           >
-            <Star className={`w-4 h-4 ${unstarring ? 'animate-pulse' : ''}`} />
-          </button>
+            <StarOff className={`w-4 h-4 ${unstarring ? 'animate-pulse' : ''}`} />
+          </SelectionAwareButton>
         </div>
       </div>
 
-      {/* Description with Tooltip */}
+      {/* Description with Tooltip - Enhanced for Light Mode */}
       <div className="mb-4 flex-1">
         <div
-          className="relative"
+          className="relative group"
           onMouseEnter={() => isTextTruncated && setShowTooltip(true)}
           onMouseLeave={() => setShowTooltip(false)}
         >
           <p
             ref={descriptionRef}
-            className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed line-clamp-3 mb-2"
+            className="text-gray-800 dark:text-text-secondary text-[13px] leading-[1.625] line-clamp-3 mb-2 transition-colors duration-200 hover:text-gray-900 dark:hover:text-text-primary rounded px-1 -mx-1 hover:bg-gray-50/50 dark:hover:bg-white/[0.02]"
           >
             {highlightSearchTerm(displayContent.content, searchQuery)}
           </p>
 
-          {/* Tooltip - Only show when text is actually truncated */}
+          {/* Enhanced Tooltip - Optimized for Light Mode Readability */}
           {isTextTruncated && showTooltip && (
-            <div className="absolute z-50 bottom-full left-0 right-0 mb-2 p-3 bg-gray-900 dark:bg-gray-700 text-white text-sm rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 max-h-48 overflow-y-auto">
-              <div className="whitespace-pre-wrap break-words">
+            <div className="absolute z-50 bottom-full left-0 right-0 mb-2 p-4 bg-white dark:bg-surface-3 text-gray-900 dark:text-text-primary text-[13px] leading-[1.625] rounded-xl shadow-dialog border border-gray-200/80 dark:border-white/[0.04] animate-fade-in max-h-[280px] overflow-y-auto scrollbar-auto">
+              <div className="whitespace-pre-wrap break-words pr-2">
                 {highlightSearchTerm(displayContent.content, searchQuery)}
               </div>
-              {/* Arrow */}
-              <div className="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+              {/* Arrow with Light Mode Optimization */}
+              <div className="absolute top-full left-4 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-white dark:border-t-surface-3 drop-shadow-sm"></div>
             </div>
           )}
         </div>
 
-        <div className="flex items-center space-x-2">
-          {displayContent.isCustom && (
-            <div className="flex items-center space-x-1 text-xs text-orange-600 dark:text-orange-400">
+        {/* 方案一：同时显示多个状态标签 */}
+        <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+          {/* 已自定义标签 - 与筛选器逻辑一致 */}
+          {displayContent.isCustomized && (
+            <div className="flex items-center space-x-1 text-xs text-gray-700 dark:text-text-secondary" title={language === 'zh' ? '此仓库已自定义（描述、标签或分类）' : 'This repository has been customized (description, tags or category)'}>
               <Edit3 className="w-3 h-3" />
-              <span>{language === 'zh' ? '自定义' : 'Custom'}</span>
+              <span>{language === 'zh' ? '已自定义' : 'Customized'}</span>
             </div>
           )}
-          {displayContent.isFailed && (
-            <div className="flex items-center space-x-1 text-xs text-red-600 dark:text-red-400">
+          {/* AI 分析状态标签 (合并展示) */}
+          {displayContent.isAnalysisFailed ? (
+            <div className="flex items-center space-x-1 text-xs text-status-red dark:text-status-red" title={language === 'zh' ? 'AI分析失败，点击AI按钮重新分析' : 'AI analysis failed, click AI button to retry'}>
               <Bot className="w-3 h-3" />
-              <span>{language === 'zh' ? '分析失败' : 'Analysis Failed'}</span>
+              <span>{language === 'zh' ? '分析失败' : 'Failed'}</span>
             </div>
-          )}
-          {displayContent.isAI && !displayContent.isFailed && (
-            <div className="flex items-center space-x-1 text-xs text-green-600 dark:text-green-400">
-              <Bot className="w-3 h-3" />
-              <span>{language === 'zh' ? 'AI总结' : 'AI Summary'}</span>
+          ) : displayContent.isAnalyzed ? (
+            <div 
+              className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gradient-to-r from-brand-indigo/10 to-brand-violet/10 text-brand-violet dark:from-brand-indigo/20 dark:to-brand-violet/20 dark:text-brand-violet border border-brand-violet/20 dark:border-brand-violet/20" 
+              title={displayContent.analyzedAt ? `${language === 'zh' ? '分析于' : 'Analyzed on'} ${new Date(displayContent.analyzedAt).toLocaleString()}` : ''}
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>{language === 'zh' ? 'AI已分析' : 'AI Analyzed'}</span>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
-      {/* Category Display */}
-      {displayCategory && (
-        <div className="mb-3">
-          <span className="inline-flex items-center px-2 py-1 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 rounded-md text-xs font-medium">
-            {displayCategory}
-          </span>
-        </div>
-      )}
-
-      {/* Tags */}
+      {/* Tags - 未AI分析时显示Topics，AI分析后显示AI标签 */}
       {displayTags.tags.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-4">
-          {displayTags.tags.slice(0, 3).map((tag, index) => (
+          {displayTags.tags.map((tagItem, index) => (
             <span
-              key={index}
-              className="px-2 py-1 rounded-md text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+              key={`tag-${index}`}
+              className="px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-700 dark:bg-white/[0.04] dark:text-text-secondary border border-transparent dark:border-white/[0.04]"
             >
-              {highlightSearchTerm(tag, searchQuery)}
+              {highlightSearchTerm(tagItem.tag, searchQuery)}
             </span>
           ))}
-          {repository.topics && repository.topics.length > 0 && !displayTags.isCustom && (
-            <>
-              {repository.topics.slice(0, 2).map((topic, index) => (
-                <span
-                  key={`topic-${index}`}
-                  className="px-2 py-1 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 rounded-md text-xs font-medium"
-                >
-                  {topic}
-                </span>
-              ))}
-            </>
-          )}
         </div>
       )}
 
       {/* Platform Icons */}
       {repository.ai_platforms && repository.ai_platforms.length > 0 && (
         <div className="flex items-center space-x-2 mb-4">
-          <span className="text-xs text-gray-500 dark:text-gray-400">
+          <span className="text-xs text-gray-700 dark:text-text-secondary">
             {language === 'zh' ? '支持平台:' : 'Platforms:'}
           </span>
           <div className="flex space-x-1">
@@ -548,7 +954,7 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
               return (
                 <div
                   key={index}
-                  className="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors cursor-default"
+                  className="w-6 h-6 flex items-center justify-center bg-light-surface dark:bg-white/[0.04] rounded text-gray-700 dark:text-text-tertiary hover:bg-gray-200 dark:hover:bg-white/10 dark:hover:text-gray-700 transition-colors cursor-default"
                   title={displayName}
                 >
                   <IconComponent className="w-3 h-3" />
@@ -562,61 +968,108 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
       {/* Stats */}
       <div className="space-y-3 mt-auto">
         {/* Language and Stars */}
-        <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-          <div className="flex items-center space-x-4">
-            {repository.language && (
-              <div className="flex items-center space-x-1">
-                <div
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: getLanguageColor(repository.language) }}
-                />
-                <span className="truncate max-w-20">{repository.language}</span>
-              </div>
-            )}
+        <div className="flex items-center space-x-4 text-sm text-gray-700 dark:text-text-secondary">
+          {repository.language && (
             <div className="flex items-center space-x-1">
-              <Star className="w-4 h-4" />
-              <span>{formatNumber(repository.stargazers_count)}</span>
+              <div
+                className="w-3 h-3 rounded-full"
+                style={{ backgroundColor: getLanguageColor(repository.language) }}
+              />
+              <span className="truncate max-w-20">{repository.language}</span>
             </div>
-          </div>
-
-          <div className="flex items-center space-x-2">
-            {repository.last_edited && (
-              <div className="flex items-center space-x-1 text-xs">
-                <Edit3 className="w-3 h-3 text-orange-500" />
-                <span>{language === 'zh' ? '已编辑' : 'Edited'}</span>
-              </div>
-            )}
-            {repository.analysis_failed ? (
-              <div className="flex items-center space-x-1 text-xs">
-                <div className="w-2 h-2 bg-red-500 rounded-full" />
-                <span>{language === 'zh' ? '分析失败' : 'Analysis failed'}</span>
-              </div>
-            ) : repository.analyzed_at && (
-              <div className="flex items-center space-x-1 text-xs">
-                <div className="w-2 h-2 bg-green-500 rounded-full" />
-                <span>{language === 'zh' ? 'AI已分析' : 'AI analyzed'}</span>
-              </div>
-            )}
+          )}
+          <div className="flex items-center space-x-1">
+            <Star className="w-4 h-4" />
+            <span>{formatNumber(repository.stargazers_count)}</span>
           </div>
         </div>
 
         {/* Update Time - Single Row */}
-        <div className="flex items-center text-sm text-gray-500 dark:text-gray-400 pt-2 border-t border-gray-100 dark:border-gray-700">
+        <div className="flex items-center justify-between text-sm text-gray-700 dark:text-text-secondary pt-2 border-t border-black/[0.04] dark:border-white/[0.04]">
           <div className="flex items-center space-x-1">
             <Calendar className="w-4 h-4 flex-shrink-0" />
             <span className="truncate">
               {language === 'zh' ? '最近提交' : 'Last pushed'} {formatDistanceToNow(new Date(repository.pushed_at || repository.updated_at), { addSuffix: true })}
             </span>
           </div>
+
+          {/* 选择按钮 */}
+          {onSelect && (
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect(repository.id);
+              }}
+              className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
+                isSelected
+                  ? 'bg-gray-200 text-gray-900 dark:bg-white/[0.08] dark:text-text-primary'
+                  : 'text-gray-400 dark:text-text-tertiary hover:bg-light-surface dark:hover:bg-white/10'
+              }`}
+              title={isSelected ? (language === 'zh' ? '取消选择' : 'Deselect') : (language === 'zh' ? '选择' : 'Select')}
+            >
+              {isSelected ? <CheckSquare className="w-5 h-5" /> : <Square className="w-5 h-5" />}
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Repository Edit Modal */}
-      <RepositoryEditModal
-        isOpen={editModalOpen}
-        onClose={() => setEditModalOpen(false)}
-        repository={repository}
-      />
+      {/* Repository Edit Modal - Using portal to render outside card container */}
+      {editModalOpen && createPortal(
+        <RepositoryEditModal
+          isOpen={editModalOpen}
+          onClose={() => setEditModalOpen(false)}
+          repository={repository}
+        />,
+        document.body
+      )}
+
+      {/* README Modal - Using portal to render outside card container */}
+      {readmeModalOpen && createPortal(
+        <ReadmeModal
+          isOpen={readmeModalOpen}
+          onClose={() => setReadmeModalOpen(false)}
+          repository={repository}
+        />,
+        document.body
+      )}
     </div>
   );
 };
+
+// 使用 React.memo 优化，避免不必要的重渲染
+export const RepositoryCard = React.memo(RepositoryCardComponent, (prevProps, nextProps) => {
+  const allCategoriesEqual = 
+    prevProps.allCategories.length === nextProps.allCategories.length &&
+    prevProps.allCategories.every((cat, i) => {
+      const nextCat = nextProps.allCategories[i];
+      return nextCat && 
+             cat.id === nextCat.id && 
+             cat.name === nextCat.name && 
+             JSON.stringify(cat.keywords) === JSON.stringify(nextCat.keywords);
+    });
+
+  return (
+    prevProps.repository.id === nextProps.repository.id &&
+    prevProps.repository.analyzed_at === nextProps.repository.analyzed_at &&
+    prevProps.repository.analysis_failed === nextProps.repository.analysis_failed &&
+    prevProps.repository.ai_summary === nextProps.repository.ai_summary &&
+    prevProps.repository.ai_tags === nextProps.repository.ai_tags &&
+    prevProps.repository.ai_platforms === nextProps.repository.ai_platforms &&
+    prevProps.repository.custom_description === nextProps.repository.custom_description &&
+    prevProps.repository.custom_tags === nextProps.repository.custom_tags &&
+    prevProps.repository.custom_category === nextProps.repository.custom_category &&
+    prevProps.repository.category_locked === nextProps.repository.category_locked &&
+    prevProps.repository.description === nextProps.repository.description &&
+    prevProps.repository.topics === nextProps.repository.topics &&
+    prevProps.repository.stargazers_count === nextProps.repository.stargazers_count &&
+    prevProps.repository.pushed_at === nextProps.repository.pushed_at &&
+    prevProps.repository.updated_at === nextProps.repository.updated_at &&
+    prevProps.showAISummary === nextProps.showAISummary &&
+    prevProps.searchQuery === nextProps.searchQuery &&
+    prevProps.isSelected === nextProps.isSelected &&
+    prevProps.selectionMode === nextProps.selectionMode &&
+    prevProps.isExitingSelection === nextProps.isExitingSelection &&
+    allCategoriesEqual
+  );
+});
