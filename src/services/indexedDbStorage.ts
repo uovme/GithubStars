@@ -120,16 +120,30 @@ export const indexedDBStorage: StateStorage = {
     }
 
     try {
-      const idbValue = await withTimeout(idbGet(name));
-      if (idbValue !== null) return idbValue;
+      // Read from both stores in parallel
+      const [idbValue, lsValue] = await Promise.all([
+        withTimeout(idbGet(name)),
+        Promise.resolve(safeLocalStorageGet(name)),
+      ]);
 
-      // Migration path: restore existing localStorage snapshot into IndexedDB
-      const legacyValue = safeLocalStorageGet(name);
-      if (legacyValue !== null) {
-        await withTimeout(idbSet(name, legacyValue));
-        console.info('[storage] migrated state from localStorage to IndexedDB');
+      // localStorage is written synchronously (guaranteed latest), so prefer it
+      // when both stores have data. This handles stale IndexedDB data from before
+      // the write-order fix.
+      if (lsValue !== null) {
+        // Sync localStorage data to IndexedDB if they differ
+        if (idbValue !== lsValue) {
+          await withTimeout(idbSet(name, lsValue));
+        }
+        return lsValue;
       }
-      return legacyValue;
+
+      // Only IndexedDB has data — return it and migrate to localStorage
+      if (idbValue !== null) {
+        safeLocalStorageSet(name, idbValue);
+        return idbValue;
+      }
+
+      return null;
     } catch (error) {
       console.warn('[storage] IndexedDB get failed, fallback to localStorage:', error);
       return safeLocalStorageGet(name);
