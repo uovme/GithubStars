@@ -1,272 +1,126 @@
 <div align="center">
 
-![Logo](upload/logo.png)
+<img src="upload/logo.png" width="120" alt="Logo" />
 
 # GithubStarsManager
 
-![100% 本地数据](https://img.shields.io/badge/数据存储-100%25本地-success?style=flat&logo=database&logoColor=white) ![AI 支持](https://img.shields.io/badge/AI-支持多模型-blue?style=flat&logo=openai&logoColor=white) ![全平台](https://img.shields.io/badge/平台-Windows%20%7C%20macOS%20%7C%20Linux-purple?style=flat&logo=electron&logoColor=white) [![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/AmintaCCCP/GithubStarsManager)
+**AI-powered GitHub Stars manager — sync, categorize, search, and track releases.**
 
+![Data](https://img.shields.io/badge/Storage-100%25_Local-success?style=flat&logo=database&logoColor=white)
+![AI](https://img.shields.io/badge/AI-Multi--Model-blue?style=flat&logo=openai&logoColor=white)
+![Platform](https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-purple?style=flat&logo=electron&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow?style=flat)
 
-An app for managing github starred repositories.
-
-<a href="https://www.producthunt.com/products/githubstarsmanager?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-githubstarsmanager" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1001489&theme=light&t=1754373322417" alt="GithubStarsManager - AI&#0032;organizes&#0032;GitHub&#0032;stars&#0032;for&#0032;easy&#0032;find | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
+[中文文档](README_zh.md) | English
 
 </div>
 
-**[中文文档](README_zh.md)** | English  
-
-
-## ✨ Features
-
-> Tired of starring everything and finding nothing?
-
-GitHub Stars Manager automatically syncs your starred repos, uses AI to summarize and categorize them, and lets you find anything with semantic search. Track releases, filter assets, and one‑click download—smarter than manual tags, simpler than GitHub.
-
-### Core Features
-
-| Feature | Description |
-|---------|-------------|
-| **Auto-sync Stars** | Connect your GitHub token to automatically pull all starred repositories |
-| **AI Summaries & Categories** | Generate tags, topics, and short README overviews using AI |
-| **Semantic Search** | Find repos by intent, not exact names |
-| **Release Tracking** | Subscribe to repos and see new versions in one unified timeline |
-| **One‑click Downloads** | Expand release assets and download instantly |
-| **Smart Asset Filters** | Match assets by keywords (dmg / mac / arm64 / aarch64) |
-| **Bilingual Wiki Jump** | Deepwiki (EN) or zread (ZH) based on repository language |
-| **Packaged Client** | No environment setup required—download and run |
-
-### Optional Backend Server
-
-Deploy an Express + SQLite backend for:
-
-- **Cross-device Sync** — Share data between browsers and devices
-- **CORS-free API Proxying** — AI and WebDAV calls route through the server
-- **Encrypted Token Storage** — API keys stored securely, never exposed to browser
-
 ---
 
-## 🔍 Interface Preview
+Star too many repos, can't find anything? GithubStarsManager syncs your starred repositories, uses AI to generate summaries and categories, and lets you search by meaning — not just keywords. Track releases, filter assets by platform, and download with one click.
 
-### 1. Repository Management (`Stars` View)
+## Features
 
-**Features:**
-- **AI Batch Analysis** — Select multiple repos and use AI to auto-generate descriptions, tags, and categories; supports pause/resume
-- **Repo Card Display** — Shows stars, forks, language, default branch status; supports expanding README preview
-- **Category Sidebar** — Drag to reorder categories, custom category colors, collapse/expand sidebar; supports locking categories to prevent AI overrides
-- **Bulk Action Toolbar** — Bulk categorize to a specified category, bulk restore AI analysis results
-- **Multi-layout Support** — Adapts layout for desktop and tablet
-- **Subscription Indicators** — Shows which repos have Release update subscriptions
-- **AI Analysis Status** — Shows analyzed / not analyzed / analysis failed; filter by analysis status
+- **Auto Sync** — Pull all starred repos with a GitHub token
+- **AI Analysis** — Generate descriptions, tags, and categories automatically
+- **Semantic Search** — Find repos by intent, not exact names
+- **Release Timeline** — Subscribe to repos, see new versions in one feed
+- **Smart Filters** — Filter assets by OS, architecture, file type
+- **One-click Download** — Expand and download release assets directly
+- **WebDAV Backup** — Sync data via Jianguoyun, Nextcloud, or any WebDAV server
+- **Bilingual Wiki** — Jump to Deepwiki (EN) or Zread (ZH) per repo
+- **Cross-device Sync** — Optional backend for sharing data across devices
+- **Desktop Client** — Download and run, no setup needed
 
-**Screenshot:**
-![Repository Management Interface](upload/repo.png)
+## Quick Start
 
----
+### Desktop (Recommended)
 
-### 2. Release Timeline (`Releases` View)
+Download from [Releases](https://github.com/AmintaCCCP/GithubStarsManager/releases).
 
-**Features:**
-- **Release Subscription Management** — Subscribe/unsubscribe to repo releases; supports bulk unsubscribe
-- **Timeline Display** — Lists all new releases in reverse chronological order; shows read/unread status
-- **Smart Asset Filtering** — Filter by platform (macOS / Windows / Linux / ARM); filter by file type (dmg / zip / deb / rpm / apk)
-- **Custom Filter Rules** — Save custom keyword filter rules
-- **Expand & Download** — Expand release assets list, one-click copy download links; shows file size
-- **Release Details** — Displays version number, release name, time since release
-- **Multi-view Modes** — List view / Grid view toggle
-- **Paginated Loading** — Load historical release records page by page
-- **Refresh Status Indicator** — Shows last refresh time
-
-**Screenshot:**
-![Release Timeline Interface](upload/release.png)
-
----
-
-### 3. Discovery / Trending (`Discover` View)
-
-**Features:**
-- **Five Discovery Channels** — Trending / Hot Release / Most Popular / Topic / Search
-- **Trending Time Range** — Three time dimensions: Today / This Week / This Month
-- **Trending Filtering Rules** — Updated within 30 days, 50+ stars, sorted by stars descending
-- **Platform Filtering** — Filter by OS (All / macOS / Windows / Linux / Browser)
-- **Programming Language Filtering** — Filter by language (JavaScript / TypeScript / Python / Go / Rust, etc.)
-- **AI Repo Analysis** — One-click AI analysis for trending repos
-- **Subscribe to Trending Repos** — Add interesting trending repos to subscription list
-- **Mobile Tab Navigation** — Channel switching adapted for mobile devices
-
-**About Trending:**
-> Trending data is sourced from GitHub's trending RSS feed, auto-updated every 30 minutes. Perfect for discovering emerging hot projects, tracking tech trends, and finding learning directions.
-
-**Screenshot:**
-![Discovery Trending Interface](upload/discovery.png)
-
----
-
-### 4. Search & Filters
-
-**Features:**
-- **Multi-dimensional Search** — Keyword search, repo status filter, tag filter, language filter, platform filter
-- **AI Analysis Status Filter** — Analyzed / Not Analyzed / Analysis Failed / Edited
-- **Release Subscription Filter** — Subscribed / Not Subscribed to Release
-- **Category Status Filter** — Category Locked / Not Locked
-- **Shortcut Keys Support** — Displays search shortcut hints
-- **Search Statistics** — Shows result count and filter conditions
-- **Search Demo Mode** — Demonstrates semantic search capabilities
-
-**Screenshot:**
-![Search Interface](upload/search.png)
-
----
-
-### 5. Settings Panel
-
-**Settings Groups:**
-
-| Group | Features |
-|-------|----------|
-| **General** | Language toggle (ZH/EN), theme settings |
-| **AI Config** | Configure OpenAI / Anthropic / Ollama / compatible APIs; supports custom endpoints and keys |
-| **WebDAV** | Backup config for Jianguoyun, Nextcloud, ownCloud, and standard WebDAV services |
-| **Backup** | Backup history, manual backup/restore, incremental backup |
-| **Backend Server** | Connect to self-hosted backend, API key authentication, sync status indicator |
-| **Category** | Category management, category sorting, default category override rules |
-| **Data Management** | Data import/export, clear local data, reset all data |
-
-**Screenshot:**
-![Settings Panel Interface](upload/settings.png)
-
----
-
-### 6. Custom AI Models
-
-**Features:**
-- **Multi AI Provider Support** — OpenAI (GPT-3.5/GPT-4), Anthropic (Claude), Ollama (local models), any OpenAI-compatible API
-- **Custom Endpoints** — Supports privately deployed AI services
-- **Connection Testing** — Test API connection after configuration
-- **AI Model Selection** — Choose the specific model to use
-
-**Screenshot:**
-![AI Configuration Interface](upload/ai.png)
-
-## 🛠 Tech Stack
-
-- **Frontend**: React 18 + TypeScript + Tailwind CSS
-- **State Management**: Zustand
-- **Icons**: Lucide React + Font Awesome
-- **Build Tool**: Vite
-
-## 👋🏻 How to Use
-
-### 💻 Desktop Client (Recommended)
-
-You can download desktop client here:
-https://github.com/AmintaCCCP/GithubStarsManager/releases
-
-### 🤖 Run With code
-
-1. Download the source code, or clone the repository
-2. Navigate to the directory, and open a Terminal window at the downloaded folder.
-3. Run `npm install` to install dependencies and `npm run dev` to build
-
-### 🐳 Run With Docker
-
-The application uses a single-container architecture — Express serves both API and frontend. See [DOCKER.md](DOCKER.md) for full details.
+### Docker
 
 ```bash
 docker compose up -d --build
-# Visit http://localhost:8080
+# Open http://localhost:8080
 ```
 
-### 🖥️ Backend Server (Optional)
+### From Source
 
-The app works fully without a backend (pure frontend, localStorage). An optional Express + SQLite backend adds:
-- **Cross-device sync**: Share data between browsers/devices
-- **CORS-free proxying**: AI and WebDAV calls go through the server, avoiding browser CORS issues
-- **Token security**: API keys stored encrypted on server, never exposed to browser network tab
-
-#### Manual Setup
 ```bash
-cd server
 npm install
 npm run dev
 ```
 
-#### Environment Variables
+### With Backend Server (Optional)
+
+```bash
+cd server && npm install && npm run dev
+```
+
+The backend adds cross-device sync, CORS-free API proxying, and encrypted token storage. Without it, everything runs in browser localStorage.
+
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `API_SECRET` | No | Bearer token for API authentication. If unset, auth is disabled. |
-| `ENCRYPTION_KEY` | No | AES-256 key for encrypting stored secrets. Auto-generated if unset. |
+| `API_SECRET` | No | Bearer token for API auth |
+| `ENCRYPTION_KEY` | No | AES-256 key for stored secrets |
 
-#### Connecting Frontend to Backend
-1. Open Settings panel in the app
-2. Find "Backend Server" section
-3. Enter API Secret (if configured)
-4. Click "Test Connection" — green indicator means connected
-5. Use "Sync to Backend" / "Sync from Backend" to transfer data
+## AI Configuration
 
-## 🤖 AI Service Configuration
+Supports multiple providers — configure in Settings:
 
-The app supports multiple AI providers. Configure yours in the Settings panel:
+- **OpenAI** (GPT-3.5 / GPT-4)
+- **Anthropic** (Claude)
+- **Ollama** (local models, no API key)
+- **Any OpenAI-compatible API** (custom endpoint + key)
 
-- **OpenAI**: GPT-3.5 / GPT-4
-- **Anthropic**: Claude
-- **Ollama**: local models with no API key needed
-- **Any OpenAI-compatible API**: custom endpoint + key
+## Screenshots
 
-Steps: open Settings, add an AI config, enter your endpoint and key, pick a model, then test the connection.
+| Stars | Releases | Discover |
+|-------|----------|----------|
+| ![Stars](upload/repo.png) | ![Releases](upload/release.png) | ![Discover](upload/discovery.png) |
 
-## 💾 WebDAV Backup Configuration
+| Search | Settings | AI Config |
+|--------|----------|-----------|
+| ![Search](upload/search.png) | ![Settings](upload/settings.png) | ![AI](upload/ai.png) |
 
-Back up and sync your data via any standard WebDAV service:
+## Tech Stack
 
-- **Jianguoyun (坚果云)**: recommended for users in China
-- **Nextcloud**: self-hosted cloud storage
-- **ownCloud**: enterprise-grade option
-- **Any standard WebDAV server**
+React 18 · TypeScript · Tailwind CSS · Zustand · Vite · Electron · Express · SQLite
 
-Steps: open Settings, add a WebDAV config, enter the server URL, username, password, and path, test the connection, then enable auto-backup.
-
-## 🚀 Deployment
+## Deployment
 
 ### Docker (Recommended)
 ```bash
 docker compose up -d --build
 ```
-For reverse proxy (1Panel, Nginx, Caddy), point your domain to `http://127.0.0.1:8080`.
 
-### Static Hosting (Frontend Only)
-The frontend build output is a static site that can be deployed anywhere:
+### Static Hosting
+Build output is a static site — deploy to Netlify, Vercel, Cloudflare Pages, GitHub Pages, or any HTTP server:
+```bash
+npm run build  # output: dist/
+```
 
-- **Netlify**: connect your fork, set build command `npm run build`, publish directory `dist`
-- **Vercel**: same as Netlify — import repo, build runs automatically
-- **GitHub Pages**: push the `dist` folder to a `gh-pages` branch
-- **Cloudflare Pages**: connect repo, build command `npm run build`, output `dist`
-- **Self-hosted**: serve the `dist` folder with any HTTP server (nginx, Caddy, etc.)
+### Reverse Proxy
+Point your domain to `http://127.0.0.1:8080`. No special headers needed.
 
-## Who it's for
+## Who It's For
 
-Developers with hundreds/thousands of stars
-People who systematically track releases
-"Lazy-efficient" users who don't want manual tagging
+- Developers with hundreds of starred repos
+- People who track tool releases systematically
+- Anyone who wants AI-organized stars without manual tagging
 
-## Additional Notes
+## Contributing
 
-1. The backend is optional but recommended for web deployment. Without it, all data is stored in your browser's localStorage — back up important data regularly.
-2. I can't write code, this app is entirely written by the AI, mainly for my personal requirment. If you have a new feature or meet a bug, I can only try to do it, but I can't guarantee it, because it depends on the AI to do it successfully.😹
+1. Fork the repo
+2. Create a branch (`git checkout -b feature/xxx`)
+3. Commit and push
+4. Open a Pull Request
 
-## 🤝 Contributing
+## License
 
-Contributions are welcome!
-
-1. Fork the project
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📄 License
-
-MIT — see [LICENSE](LICENSE) for details.
+[MIT](LICENSE)
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=AmintaCCCP/GithubStarsManager&type=Date)](https://www.star-history.com/#AmintaCCCP/GithubStarsManager&Date)
+[![Star History](https://api.star-history.com/svg?repos=AmintaCCCP/GithubStarsManager&type=Date)](https://www.star-history.com/#AmintaCCCP/GithubStarsManager&Date)
