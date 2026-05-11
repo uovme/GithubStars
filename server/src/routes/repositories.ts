@@ -12,6 +12,11 @@ function parseJsonColumn(value: unknown): unknown[] {
   } catch { return []; }
 }
 
+function stringifyJsonArrayColumn(value: unknown): string {
+  if (typeof value === 'string') return value;
+  return JSON.stringify(Array.isArray(value) ? value : []);
+}
+
 // Helper to transform DB row to API response
 function transformRepo(row: Record<string, unknown>) {
   return {
@@ -40,6 +45,40 @@ function transformRepo(row: Record<string, unknown>) {
     last_edited: row.last_edited,
     subscribed_to_releases: !!row.subscribed_to_releases,
   };
+}
+
+function isFieldPresent(repo: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(repo, key);
+}
+
+function mergeRepoWithExisting(
+  repo: Record<string, unknown>,
+  existing: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  if (!existing) return repo;
+
+  const merged = { ...repo };
+  const preservableFields = [
+    'ai_summary',
+    'ai_tags',
+    'ai_platforms',
+    'analyzed_at',
+    'analysis_failed',
+    'custom_description',
+    'custom_tags',
+    'custom_category',
+    'category_locked',
+    'last_edited',
+    'subscribed_to_releases',
+  ];
+
+  for (const field of preservableFields) {
+    if (!isFieldPresent(repo, field)) {
+      merged[field] = existing[field];
+    }
+  }
+
+  return merged;
 }
 
 // GET /api/repositories
@@ -129,6 +168,7 @@ router.put('/api/repositories', (req, res) => {
         subscribed_to_releases
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
+    const findExistingRepo = db.prepare('SELECT * FROM repositories WHERE id = ?');
 
     const deleteAllReleases = db.prepare('DELETE FROM releases');
     const deleteAllRepositories = db.prepare('DELETE FROM repositories');
@@ -157,7 +197,9 @@ router.put('/api/repositories', (req, res) => {
       }
 
       let count = 0;
-      for (const repo of repositories) {
+      for (const incomingRepo of repositories) {
+        const existingRepo = findExistingRepo.get(incomingRepo.id) as Record<string, unknown> | undefined;
+        const repo = mergeRepoWithExisting(incomingRepo, existingRepo);
         const owner = repo.owner as { login?: string; avatar_url?: string } | undefined;
         stmt.run(
           repo.id, repo.name, repo.full_name, repo.description ?? null,
@@ -165,13 +207,13 @@ router.put('/api/repositories', (req, res) => {
           repo.created_at ?? null, repo.updated_at ?? null, repo.pushed_at ?? null,
           repo.starred_at ?? null,
           owner?.login ?? '', owner?.avatar_url ?? null,
-          JSON.stringify(Array.isArray(repo.topics) ? repo.topics : []),
+          stringifyJsonArrayColumn(repo.topics),
           repo.ai_summary ?? null,
-          JSON.stringify(Array.isArray(repo.ai_tags) ? repo.ai_tags : []),
-          JSON.stringify(Array.isArray(repo.ai_platforms) ? repo.ai_platforms : []),
+          stringifyJsonArrayColumn(repo.ai_tags),
+          stringifyJsonArrayColumn(repo.ai_platforms),
           repo.analyzed_at ?? null, (repo.analysis_failed === true || repo.analysis_failed === 1) ? 1 : 0,
           repo.custom_description ?? null,
-          JSON.stringify(Array.isArray(repo.custom_tags) ? repo.custom_tags : []),
+          stringifyJsonArrayColumn(repo.custom_tags),
           repo.custom_category ?? null, (repo.category_locked === true || repo.category_locked === 1) ? 1 : 0, repo.last_edited ?? null,
           (repo.subscribed_to_releases === true || repo.subscribed_to_releases === 1) ? 1 : 0
         );

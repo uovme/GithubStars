@@ -26,6 +26,10 @@ import {
   defaultSubscriptionChannels
 } from '../types';
 import { indexedDBStorage, safeLocalStorageSet, canUseIndexedDB, idbSet } from '../services/indexedDbStorage';
+import {
+  mergeRepositoryAnalysisSnapshotsSync,
+  saveRepositoryAnalysisSnapshot,
+} from '../services/repositoryAnalysisStorage';
 import { PRESET_FILTERS } from '../constants/presetFilters';
 
 const BACKEND_SECRET_SESSION_KEY = 'github-stars-manager-backend-secret';
@@ -804,8 +808,15 @@ export const useAppStore = create<AppState & AppActions>()(
       }),
 
       // Repository actions
-      setRepositories: (repositories) => set({ repositories, searchResults: repositories }),
+      setRepositories: (repositories) => {
+        const restoredRepositories = mergeRepositoryAnalysisSnapshotsSync(repositories);
+        restoredRepositories.forEach((repo) => {
+          void saveRepositoryAnalysisSnapshot(repo);
+        });
+        set({ repositories: restoredRepositories, searchResults: restoredRepositories });
+      },
       updateRepository: (repo) => set((state) => {
+        void saveRepositoryAnalysisSnapshot(repo);
         const updatedRepositories = state.repositories.map(r => r.id === repo.id ? repo : r);
         return {
           repositories: updatedRepositories,
