@@ -1,121 +1,182 @@
 <div align="center">
 
-<img src="upload/logo.png" width="120" alt="Logo" />
+<img src="upload/logo.png" width="120" alt="GithubStars logo" />
 
-# GithubStarsManager
+# GithubStars
 
-**AI-powered GitHub Stars manager — sync, categorize, search, and track releases.**
+**An AI-assisted workspace for organizing, searching, and tracking your GitHub Stars.**
 
-![Data](https://img.shields.io/badge/Storage-100%25_Local-success?style=flat&logo=database&logoColor=white)
-![AI](https://img.shields.io/badge/AI-Multi--Model-blue?style=flat&logo=openai&logoColor=white)
-![Platform](https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-purple?style=flat&logo=electron&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-yellow?style=flat)
+![Storage](https://img.shields.io/badge/storage-local--first-success?style=flat&logo=sqlite&logoColor=white)
+![AI](https://img.shields.io/badge/AI-OpenAI%20%7C%20Claude%20%7C%20Gemini-blue?style=flat&logo=openai&logoColor=white)
+![Docker](https://img.shields.io/badge/deploy-Docker-2496ED?style=flat&logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-yellow?style=flat)
 
-[中文文档](README_zh.md) | English
+English | [中文](README_zh.md)
 
 </div>
 
 ---
 
-Star too many repos, can't find anything? GithubStarsManager syncs your starred repositories, uses AI to generate summaries and categories, and lets you search by meaning — not just keywords. Track releases, filter assets by platform, and download with one click.
+GithubStars turns a long, hard-to-search Star list into a structured knowledge base. It syncs your starred repositories, uses AI to generate summaries, tags, platforms, and categories, then gives you semantic search, release tracking, discovery feeds, WebDAV backup, and optional cross-device sync.
 
-## Features
+All core data is stored locally first. In Docker/server mode, repositories, AI analysis results, custom categories, release state, and service configs are persisted in SQLite under `/app/data`.
 
-- **Auto Sync** — Pull all starred repos with a GitHub token
-- **AI Analysis** — Generate descriptions, tags, and categories automatically
-- **Semantic Search** — Find repos by intent, not exact names
-- **Release Timeline** — Subscribe to repos, see new versions in one feed
-- **Smart Filters** — Filter assets by OS, architecture, file type
-- **One-click Download** — Expand and download release assets directly
-- **WebDAV Backup** — Sync data via Jianguoyun, Nextcloud, or any WebDAV server (including AI analysis results & categories)
-- **Bilingual Wiki** — Jump to Deepwiki (EN) or Zread (ZH) per repo
-- **Cross-device Sync** — Optional backend for sharing data across devices
-- **Desktop Client** — Download and run, no setup needed
+## Highlights
+
+- **Star sync**: import your GitHub Stars with a personal access token.
+- **AI analysis**: generate concise summaries, tags, supported platforms, and categories for repositories.
+- **Persistent categories**: AI analysis and custom category edits survive refreshes, GitHub re-syncs, and Docker restarts.
+- **Semantic search**: search by intent and concepts instead of exact repository names.
+- **Release tracking**: subscribe to selected repositories and review new releases in a timeline.
+- **Asset filters**: filter release assets by OS, architecture, source package, and custom rules.
+- **Repository discovery**: browse trending, popular, topic-based, and search-based discovery feeds.
+- **Fork tracking**: keep an eye on forked repositories and upstream activity.
+- **Backup and restore**: export data locally or sync backups through WebDAV services such as Nextcloud or Jianguoyun.
+- **Optional backend**: use the bundled Express + SQLite server for API proxying, encrypted config storage, and cross-device sync.
+
+## Screenshots
+
+| Repository Workspace | Release Timeline | Discovery |
+| --- | --- | --- |
+| ![Repository workspace](upload/repo.png) | ![Release timeline](upload/release.png) | ![Discovery](upload/discovery.png) |
+
+| Search | Settings | AI Config |
+| --- | --- | --- |
+| ![Search](upload/search.png) | ![Settings](upload/settings.png) | ![AI configuration](upload/ai.png) |
 
 ## Quick Start
 
-### Desktop (Recommended)
-
-Download from [Releases](https://github.com/AmintaCCCP/GithubStarsManager/releases).
-
 ### Docker
 
+Docker is the recommended way to run the full app with the backend and persistent SQLite storage.
+
 ```bash
+git clone https://github.com/uovme/GithubStars.git
+cd GithubStars
 docker compose up -d --build
-# Open http://localhost:8080
 ```
 
+Open:
+
+```text
+http://localhost:8087
+```
+
+The compose file maps `127.0.0.1:8087` to the app's internal port `3000` and stores persistent data in the `app-data` Docker volume.
+
 ### From Source
+
+Run the frontend only:
 
 ```bash
 npm install
 npm run dev
 ```
 
-### With Backend Server (Optional)
+Run frontend and backend together:
 
 ```bash
-cd server && npm install && npm run dev
+npm install
+cd server && npm install && cd ..
+npm run dev:all
 ```
 
-The backend adds cross-device sync, CORS-free API proxying, and encrypted token storage. Without it, everything runs in browser IndexedDB + localStorage (dual-write ensures data survives tab close).
+Common commands:
+
+```bash
+npm run test:run
+npm run build
+cd server && npm test
+cd server && npm run build
+```
+
+## Configuration
+
+### GitHub Token
+
+Create a GitHub personal access token and use it to sync your starred repositories. The app only needs access required for reading your Star list and repository metadata.
+
+### AI Providers
+
+Configure AI services in Settings. Supported API modes include:
+
+- OpenAI Chat Completions
+- OpenAI Responses
+- Claude
+- Gemini
+- OpenAI-compatible endpoints
+
+AI analysis can be run on all repositories, only unanalyzed repositories, or failed analyses. Results are saved with the repository data and can also be included in backups.
+
+### Backend Environment Variables
 
 | Variable | Required | Description |
-|----------|----------|-------------|
-| `API_SECRET` | No | Bearer token for API auth |
-| `ENCRYPTION_KEY` | No | AES-256 key for stored secrets |
+| --- | --- | --- |
+| `API_SECRET` | No | Bearer token used to protect backend APIs. If empty, auth is disabled. |
+| `ENCRYPTION_KEY` | No | AES-256 key used to encrypt stored AI/WebDAV secrets. If empty, one is generated under `/app/data`. |
 
-## AI Configuration
+## Data Storage
 
-Supports multiple providers — configure in Settings:
+GithubStars is local-first:
 
-- **OpenAI** (GPT-3.5 / GPT-4)
-- **Anthropic** (Claude)
-- **Ollama** (local models, no API key)
-- **Any OpenAI-compatible API** (custom endpoint + key)
+- Browser-only mode uses IndexedDB with a localStorage fallback for app state.
+- Docker/server mode stores synced data in SQLite at `/app/data/data.db`.
+- AI summaries, tags, platforms, categories, release subscriptions, read state, and settings are persisted.
+- WebDAV backup can export and restore repositories, AI configs, WebDAV configs, categories, release data, discovery cache, and UI settings.
 
-## Screenshots
+## Deployment Notes
 
-| Stars | Releases | Discover |
-|-------|----------|----------|
-| ![Stars](upload/repo.png) | ![Releases](upload/release.png) | ![Discover](upload/discovery.png) |
+### Docker Compose
 
-| Search | Settings | AI Config |
-|--------|----------|-----------|
-| ![Search](upload/search.png) | ![Settings](upload/settings.png) | ![AI](upload/ai.png) |
-
-## Tech Stack
-
-React 18 · TypeScript · Tailwind CSS · Zustand · Vite · Electron · Express · SQLite
-
-## Deployment
-
-### Docker (Recommended)
 ```bash
 docker compose up -d --build
 ```
 
-### Static Hosting
-Build output is a static site — deploy to Netlify, Vercel, Cloudflare Pages, GitHub Pages, or any HTTP server:
+To update an existing deployment:
+
 ```bash
-npm run build  # output: dist/
+git pull
+docker compose up -d --build
 ```
 
 ### Reverse Proxy
-Point your domain to `http://127.0.0.1:8080`. No special headers needed.
 
-## Who It's For
+Point your reverse proxy to:
 
-- Developers with hundreds of starred repos
-- People who track tool releases systematically
-- Anyone who wants AI-organized stars without manual tagging
+```text
+http://127.0.0.1:8087
+```
+
+If you change the compose port mapping, point the proxy to the new host port.
+
+### Static Hosting
+
+You can build the frontend as a static app:
+
+```bash
+npm run build
+```
+
+Static hosting runs in browser-only mode. Backend features such as cross-device sync, encrypted server-side config storage, and API proxying require the Express server.
+
+## Tech Stack
+
+- React 18
+- TypeScript
+- Vite
+- Tailwind CSS
+- Zustand
+- Express
+- SQLite
+- Docker
+- Electron build support
 
 ## Contributing
 
-1. Fork the repo
-2. Create a branch (`git checkout -b feature/xxx`)
-3. Commit and push
-4. Open a Pull Request
+1. Fork the repository.
+2. Create a feature branch.
+3. Keep changes focused and add tests for behavior changes.
+4. Open a pull request with a clear description and screenshots when UI changes are involved.
 
 ## License
 
@@ -123,4 +184,4 @@ Point your domain to `http://127.0.0.1:8080`. No special headers needed.
 
 ## Star History
 
-[![Star History](https://api.star-history.com/svg?repos=AmintaCCCP/GithubStarsManager&type=Date)](https://www.star-history.com/#AmintaCCCP/GithubStarsManager&Date)
+[![Star History](https://api.star-history.com/svg?repos=uovme/GithubStars&type=Date)](https://www.star-history.com/#uovme/GithubStars&Date)

@@ -1,15 +1,15 @@
 <div align="center">
 
-<img src="upload/logo.png" width="120" alt="Logo" />
+<img src="upload/logo.png" width="120" alt="GithubStars logo" />
 
-# GithubStarsManager
+# GithubStars
 
-**AI 驱动的 GitHub Stars 管理工具 — 同步、分类、搜索、追踪 Release。**
+**用 AI 整理、搜索和追踪你的 GitHub Stars。**
 
-![数据](https://img.shields.io/badge/存储-100%25本地-success?style=flat&logo=database&logoColor=white)
-![AI](https://img.shields.io/badge/AI-多模型支持-blue?style=flat&logo=openai&logoColor=white)
-![平台](https://img.shields.io/badge/平台-Win%20%7C%20macOS%20%7C%20Linux-purple?style=flat&logo=electron&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-yellow?style=flat)
+![存储](https://img.shields.io/badge/存储-local--first-success?style=flat&logo=sqlite&logoColor=white)
+![AI](https://img.shields.io/badge/AI-OpenAI%20%7C%20Claude%20%7C%20Gemini-blue?style=flat&logo=openai&logoColor=white)
+![Docker](https://img.shields.io/badge/部署-Docker-2496ED?style=flat&logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-yellow?style=flat)
 
 中文 | [English](README.md)
 
@@ -17,105 +17,166 @@
 
 ---
 
-Star 了太多仓库，找不到了？GithubStarsManager 自动同步你的 Star 仓库，用 AI 生成摘要和分类，支持语义搜索。追踪 Release 更新，按平台筛选资源，一键下载。
+GithubStars 会把越来越难找的 Star 列表整理成一个可搜索、可分类、可追踪更新的知识库。它可以同步你的 GitHub Stars，用 AI 生成摘要、标签、平台和分类，并提供语义搜索、Release 追踪、项目发现、WebDAV 备份和可选的跨设备同步。
 
-## 功能
+项目采用本地优先存储。Docker / 后端模式下，仓库数据、AI 分析结果、自定义分类、Release 状态和服务配置都会持久化到 `/app/data` 下的 SQLite 数据库中。
 
-- **自动同步** — 通过 GitHub Token 拉取所有 Star 仓库
-- **AI 分析** — 自动生成描述、标签和分类
-- **语义搜索** — 按意图搜索，不依赖精确关键词
-- **Release 时间线** — 订阅仓库，在一个时间线里查看所有新版本
-- **智能筛选** — 按系统、架构、文件类型筛选资源
-- **一键下载** — 展开并直接下载 Release 资源
-- **WebDAV 备份** — 通过坚果云、Nextcloud 或任意 WebDAV 服务同步数据（含AI分析结果和分类）
-- **双语 Wiki** — 根据仓库语言跳转 Deepwiki（英文）或 Zread（中文）
-- **跨设备同步** — 可选后端服务，多设备共享数据
-- **桌面客户端** — 下载即用，无需配置环境
+## 主要功能
+
+- **Star 同步**：通过 GitHub Token 导入你的 Star 仓库。
+- **AI 分析**：自动生成仓库摘要、标签、支持平台和分类。
+- **分类持久化**：AI 分析结果和自定义分类在刷新页面、重新同步 GitHub、重启 Docker 后都会保留。
+- **语义搜索**：按意图和概念搜索，不依赖精确仓库名。
+- **Release 追踪**：订阅关注的仓库，在时间线里集中查看新版本。
+- **资源筛选**：按系统、架构、源码包和自定义规则筛选 Release 资源。
+- **项目发现**：浏览趋势项目、热门项目、主题项目和搜索发现结果。
+- **Fork 追踪**：查看 fork 仓库和上游活动。
+- **备份与恢复**：支持本地导出，也支持通过 Nextcloud、坚果云等 WebDAV 服务备份。
+- **可选后端**：内置 Express + SQLite 后端，提供 API 代理、加密配置存储和跨设备同步。
+
+## 截图
+
+| 仓库工作台 | Release 时间线 | 项目发现 |
+| --- | --- | --- |
+| ![仓库工作台](upload/repo.png) | ![Release 时间线](upload/release.png) | ![项目发现](upload/discovery.png) |
+
+| 搜索 | 设置 | AI 配置 |
+| --- | --- | --- |
+| ![搜索](upload/search.png) | ![设置](upload/settings.png) | ![AI 配置](upload/ai.png) |
 
 ## 快速开始
 
-### 桌面客户端（推荐）
-
-从 [Releases](https://github.com/AmintaCCCP/GithubStarsManager/releases) 下载。
-
 ### Docker
 
+推荐使用 Docker 运行完整版本，包含后端和 SQLite 持久化存储。
+
 ```bash
+git clone https://github.com/uovme/GithubStars.git
+cd GithubStars
 docker compose up -d --build
-# 访问 http://localhost:8080
 ```
 
+访问：
+
+```text
+http://localhost:8087
+```
+
+默认 `docker-compose.yml` 会把主机的 `127.0.0.1:8087` 映射到容器内部的 `3000` 端口，并使用 `app-data` Docker volume 保存持久化数据。
+
 ### 源码运行
+
+只运行前端：
 
 ```bash
 npm install
 npm run dev
 ```
 
-### 后端服务（可选）
+同时运行前端和后端：
 
 ```bash
-cd server && npm install && npm run dev
+npm install
+cd server && npm install && cd ..
+npm run dev:all
 ```
 
-后端提供跨设备同步、免 CORS 的 API 代理和加密 Token 存储。不部署后端时，所有数据存在浏览器 IndexedDB + localStorage 中（双写保障，关闭标签页不丢数据）。
+常用命令：
+
+```bash
+npm run test:run
+npm run build
+cd server && npm test
+cd server && npm run build
+```
+
+## 配置说明
+
+### GitHub Token
+
+创建一个 GitHub Personal Access Token，用于同步 Star 仓库。应用只需要读取 Star 列表和仓库元数据所需的权限。
+
+### AI 服务
+
+在设置页面配置 AI 服务。当前支持的 API 类型包括：
+
+- OpenAI Chat Completions
+- OpenAI Responses
+- Claude
+- Gemini
+- OpenAI 兼容接口
+
+AI 分析可以对全部仓库运行，也可以只分析未分析仓库或重新分析失败项。分析结果会随仓库数据保存，也可以一起备份。
+
+### 后端环境变量
 
 | 变量 | 必填 | 说明 |
-|------|------|------|
-| `API_SECRET` | 否 | API 认证 Bearer Token |
-| `ENCRYPTION_KEY` | 否 | AES-256 加密密钥 |
+| --- | --- | --- |
+| `API_SECRET` | 否 | 后端 API 的 Bearer Token；为空时关闭鉴权。 |
+| `ENCRYPTION_KEY` | 否 | 用于加密 AI / WebDAV 密钥的 AES-256 密钥；为空时会自动生成并保存到 `/app/data`。 |
 
-## AI 配置
+## 数据存储
 
-支持多种 AI 提供商，在设置面板中配置：
+GithubStars 是本地优先应用：
 
-- **OpenAI**（GPT-3.5 / GPT-4）
-- **Anthropic**（Claude）
-- **Ollama**（本地模型，无需 API Key）
-- **任意 OpenAI 兼容 API**（自定义端点 + Key）
+- 纯前端模式使用 IndexedDB，并以 localStorage 作为备用存储。
+- Docker / 后端模式使用 SQLite，数据库路径为 `/app/data/data.db`。
+- AI 摘要、标签、平台、分类、Release 订阅、已读状态和设置都会持久化。
+- WebDAV 备份可以导出和恢复仓库、AI 配置、WebDAV 配置、分类、Release 数据、发现页缓存和界面设置。
 
-## 截图
+## 部署说明
 
-| 仓库管理 | Release 时间线 | 发现 |
-|---------|---------------|------|
-| ![仓库](upload/repo.png) | ![Release](upload/release.png) | ![发现](upload/discovery.png) |
+### Docker Compose
 
-| 搜索 | 设置 | AI 配置 |
-|------|------|---------|
-| ![搜索](upload/search.png) | ![设置](upload/settings.png) | ![AI](upload/ai.png) |
-
-## 技术栈
-
-React 18 · TypeScript · Tailwind CSS · Zustand · Vite · Electron · Express · SQLite
-
-## 部署
-
-### Docker（推荐）
 ```bash
 docker compose up -d --build
 ```
 
-### 静态托管
-构建产物是纯静态站点，可部署到 Netlify、Vercel、Cloudflare Pages、GitHub Pages 或任意 HTTP 服务器：
+更新已有部署：
+
 ```bash
-npm run build  # 输出: dist/
+git pull
+docker compose up -d --build
 ```
 
 ### 反向代理
-将域名指向 `http://127.0.0.1:8080` 即可，无需特殊 Header 配置。
 
-## 适合谁
+将反向代理指向：
 
-- Star 了几百上千个仓库的开发者
-- 需要系统性追踪工具 Release 的人
-- 想要 AI 自动整理、不想手动打标签的懒人
+```text
+http://127.0.0.1:8087
+```
+
+如果你修改了 compose 端口映射，请把代理指向新的主机端口。
+
+### 静态托管
+
+可以构建纯前端静态产物：
+
+```bash
+npm run build
+```
+
+静态托管会以浏览器本地模式运行。跨设备同步、服务端加密配置存储和 API 代理等能力需要 Express 后端。
+
+## 技术栈
+
+- React 18
+- TypeScript
+- Vite
+- Tailwind CSS
+- Zustand
+- Express
+- SQLite
+- Docker
+- Electron 构建支持
 
 ## 参与贡献
 
-1. Fork 仓库
-2. 创建分支 (`git checkout -b feature/xxx`)
-3. 提交并推送
-4. 发起 Pull Request
+1. Fork 仓库。
+2. 创建功能分支。
+3. 保持改动聚焦；行为变化请补测试。
+4. 发起 Pull Request，说明改动内容；涉及 UI 时建议附截图。
 
 ## 许可证
 
@@ -123,4 +184,4 @@ npm run build  # 输出: dist/
 
 ## Star 趋势
 
-[![Star History](https://api.star-history.com/svg?repos=AmintaCCCP/GithubStarsManager&type=Date)](https://www.star-history.com/#AmintaCCCP/GithubStarsManager&Date)
+[![Star History](https://api.star-history.com/svg?repos=uovme/GithubStars&type=Date)](https://www.star-history.com/#uovme/GithubStars&Date)
