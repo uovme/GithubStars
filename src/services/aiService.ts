@@ -79,6 +79,10 @@ export class AIService {
     return this.getApiType() === 'openai' && this.config.model.trim() === 'deepseek-reasoner';
   }
 
+  private isMiMoModel(): boolean {
+    return this.config.model.trim().toLowerCase().includes('mimo');
+  }
+
   private async requestText(options: {
     system: string;
     user: string;
@@ -97,6 +101,7 @@ export class AIService {
         { role: 'user', content: options.user },
       ];
       const isDeepSeekReasoner = this.isDeepSeekReasonerModel();
+      const isMiMoModel = this.isMiMoModel();
 
       const requestBody = apiType === 'openai-responses'
         ? {
@@ -105,6 +110,7 @@ export class AIService {
             temperature: options.temperature,
             max_output_tokens: options.maxTokens,
             ...(reasoning ? { reasoning } : {}),
+            ...(isMiMoModel ? { thinking: { type: 'disabled' } } : {}),
           }
         : {
             model: this.config.model,
@@ -112,6 +118,7 @@ export class AIService {
             max_tokens: options.maxTokens,
             ...(!isDeepSeekReasoner ? { temperature: options.temperature } : {}),
             ...(!isDeepSeekReasoner && reasoning && apiType !== 'openai-compatible' ? { reasoning } : {}),
+            ...(isMiMoModel ? { thinking: { type: 'disabled' } } : {}),
           };
 
       let data: Record<string, unknown>;
@@ -250,9 +257,12 @@ ${options.user}` : options.user;
 
     const candidates = (data as { candidates?: unknown }).candidates;
     if (Array.isArray(candidates) && candidates.length > 0) {
-      const parts = (candidates[0] as { content?: { parts?: unknown } }).content?.parts;
+      const candidate = candidates[0] as { content?: { parts?: unknown }; finishReason?: string };
+      const parts = candidate.content?.parts;
       if (Array.isArray(parts)) {
+        // Skip thought parts emitted by Gemini thinking models (e.g. gemini-2.5-pro)
         const text = parts
+          .filter((p) => p && typeof p === 'object' && !(p as { thought?: boolean }).thought)
           .map((p) => {
             if (!p || typeof p !== 'object') return '';
             const part = p as { text?: unknown };
@@ -476,7 +486,7 @@ Focus on practicality and accurate categorization to help users quickly understa
 
   async testConnection(): Promise<ConnectionTestResult> {
     const apiType = this.getApiType();
-    const timeoutMs = apiType === 'openai-responses' || this.config.reasoningEffort ? 30000 : 10000;
+    const timeoutMs = apiType === 'openai-responses' || apiType === 'gemini' || this.config.reasoningEffort ? 30000 : 10000;
 
     try {
       const base = new URL(this.config.baseUrl);
@@ -497,7 +507,7 @@ Focus on practicality and accurate categorization to help users quickly understa
           system: 'You are a connection test assistant.',
           user: 'Reply with exactly one word: OK',
           temperature: 0,
-          maxTokens: 50,
+          maxTokens: 2048,
           signal: controller.signal,
         });
         if (content) {

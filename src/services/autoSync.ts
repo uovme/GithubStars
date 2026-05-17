@@ -130,34 +130,39 @@ export async function syncFromBackend(): Promise<void> {
 
     // Update store then commit hash — hash only changes if setter succeeds
     if (changed.repos && reposResult.status === 'fulfilled') {
-      // Merge backend repos with local AI/user-edit fields to prevent data loss
+      const backendRepos = reposResult.value.repositories;
       const localRepos = state.repositories;
-      const localMap = new Map(localRepos.map(r => [r.id, r]));
-      const mergedRepos = reposResult.value.repositories.map((backendRepo) => {
-        const local = localMap.get(backendRepo.id);
-        if (!local) return backendRepo;
-        return {
-          ...backendRepo,
-          // Preserve local AI analysis results
-          ai_summary: local.ai_summary ?? backendRepo.ai_summary,
-          ai_tags: local.ai_tags ?? backendRepo.ai_tags,
-          ai_platforms: local.ai_platforms ?? backendRepo.ai_platforms,
-          analyzed_at: local.analyzed_at ?? backendRepo.analyzed_at,
-          analysis_failed: local.analysis_failed ?? backendRepo.analysis_failed,
-          // Preserve local user edits
-          custom_description: local.custom_description ?? backendRepo.custom_description,
-          custom_tags: local.custom_tags ?? backendRepo.custom_tags,
-          custom_category: local.custom_category ?? backendRepo.custom_category,
-          category_locked: local.category_locked ?? backendRepo.category_locked,
-          last_edited: local.last_edited ?? backendRepo.last_edited,
-          // Preserve release fetch state
-          has_fetched_releases: local.has_fetched_releases ?? backendRepo.has_fetched_releases,
-          last_release_fetch_time: local.last_release_fetch_time ?? backendRepo.last_release_fetch_time,
-          subscribed_to_releases: local.subscribed_to_releases ?? backendRepo.subscribed_to_releases,
-        };
-      });
-      state.setRepositories(mergedRepos);
-      _lastHash.repos = hashes.repos;
+      // Distinguish first-ever sync (bootstrap) from an authoritative empty backend.
+      const isBootstrapEmpty =
+        backendRepos.length === 0 && localRepos.length > 0 && _lastHash.repos === '';
+      if (isBootstrapEmpty) {
+        _hasPendingPush = true;
+      } else {
+        // Merge backend repos with local AI/user-edit fields to prevent data loss
+        const localMap = new Map(localRepos.map(r => [r.id, r]));
+        const mergedRepos = backendRepos.map((backendRepo) => {
+          const local = localMap.get(backendRepo.id);
+          if (!local) return backendRepo;
+          return {
+            ...backendRepo,
+            ai_summary: local.ai_summary ?? backendRepo.ai_summary,
+            ai_tags: local.ai_tags ?? backendRepo.ai_tags,
+            ai_platforms: local.ai_platforms ?? backendRepo.ai_platforms,
+            analyzed_at: local.analyzed_at ?? backendRepo.analyzed_at,
+            analysis_failed: local.analysis_failed ?? backendRepo.analysis_failed,
+            custom_description: local.custom_description ?? backendRepo.custom_description,
+            custom_tags: local.custom_tags ?? backendRepo.custom_tags,
+            custom_category: local.custom_category ?? backendRepo.custom_category,
+            category_locked: local.category_locked ?? backendRepo.category_locked,
+            last_edited: local.last_edited ?? backendRepo.last_edited,
+            has_fetched_releases: local.has_fetched_releases ?? backendRepo.has_fetched_releases,
+            last_release_fetch_time: local.last_release_fetch_time ?? backendRepo.last_release_fetch_time,
+            subscribed_to_releases: local.subscribed_to_releases ?? backendRepo.subscribed_to_releases,
+          };
+        });
+        state.setRepositories(mergedRepos);
+        _lastHash.repos = hashes.repos;
+      }
     }
     if (changed.releases && releasesResult.status === 'fulfilled') {
       state.setReleases(releasesResult.value.releases);
