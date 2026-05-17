@@ -39,6 +39,9 @@ function resolveApiSecret(dataDir: string): string | null {
   const envSecret = process.env.API_SECRET;
   if (envSecret) return envSecret;
 
+  // Don't auto-generate in test environment
+  if (process.env.NODE_ENV === 'test') return null;
+
   const secretFilePath = path.join(dataDir, '.api-secret');
   if (fs.existsSync(secretFilePath)) {
     return fs.readFileSync(secretFilePath, 'utf-8').trim();
