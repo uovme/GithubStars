@@ -220,6 +220,48 @@ router.post('/api/proxy/webdav', async (req, res) => {
   }
 });
 
+// POST /api/proxy/github/graphql — batch GraphQL queries
+router.post('/api/proxy/github/graphql', async (req, res) => {
+  try {
+    const db = getDb();
+    const { query, variables } = req.body as { query: string; variables?: Record<string, unknown> };
+
+    if (!query) {
+      res.status(400).json({ error: 'query required', code: 'QUERY_REQUIRED' });
+      return;
+    }
+
+    const tokenRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('github_token') as { value: string } | undefined;
+    if (!tokenRow?.value) {
+      res.status(400).json({ error: 'GitHub token not configured', code: 'GITHUB_TOKEN_NOT_CONFIGURED' });
+      return;
+    }
+
+    let token: string;
+    try {
+      token = decrypt(tokenRow.value, config.encryptionKey);
+    } catch {
+      res.status(500).json({ error: 'Failed to decrypt GitHub token', code: 'GITHUB_TOKEN_DECRYPT_FAILED' });
+      return;
+    }
+
+    const result = await proxyRequest({
+      url: 'https://api.github.com/graphql',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'GithubStarsManager-Backend',
+      },
+      body: { query, variables },
+    });
+    res.status(result.status).json(result.data);
+  } catch (err) {
+    console.error('GitHub GraphQL proxy error:', err);
+    res.status(500).json({ error: 'GitHub GraphQL proxy failed', code: 'GITHUB_GRAPHQL_PROXY_FAILED' });
+  }
+});
+
 // POST /api/proxy/github/search/repositories
 router.post('/api/proxy/github/search/repositories', async (req, res) => {
   try {

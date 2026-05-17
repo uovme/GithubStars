@@ -5,6 +5,16 @@ const migrations: Record<number, (db: Database.Database) => void> = {
   1: (db) => {
     initializeSchema(db);
   },
+  2: (db) => {
+    const addCol = (table: string, col: string, def: string) => {
+      const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      if (!cols.some(c => c.name === col)) {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+      }
+    };
+    addCol('repositories', 'sync_updated_at', 'TEXT');
+    addCol('releases', 'sync_updated_at', 'TEXT');
+  },
 };
 
 export function runMigrations(db: Database.Database): void {

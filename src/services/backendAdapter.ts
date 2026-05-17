@@ -365,6 +365,16 @@ class BackendAdapter {
 
   // === Health ===
 
+  async isTokenStoredOnServer(): Promise<boolean> {
+    if (!this._backendUrl) return false;
+    try {
+      const res = await this.fetchWithTimeout(`${this._backendUrl}/settings`, { headers: this.getAuthHeaders() }, 5000);
+      if (!res.ok) return false;
+      const data = await res.json() as Record<string, unknown>;
+      return data.github_token_status === 'ok';
+    } catch { return false; }
+  }
+
   async checkHealth(): Promise<{ status: string; version: string; timestamp: string } | null> {
     if (!this._backendUrl) return null;
 

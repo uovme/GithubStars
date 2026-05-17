@@ -46,6 +46,15 @@ All core data is stored locally first. In Docker/server mode, repositories, AI a
 
 ## Quick Start
 
+### New in This Version
+
+- **Offline keyword search**: when AI search is unavailable, falls back to local keyword matching on repo name, description, summary, and tags.
+- **Export star list**: export your starred repos as Markdown or CSV for sharing or backup.
+- **Rule-based auto-categorization**: automatically categorize repos by language, topics, and star count rules.
+- **Unstar detection**: detects when repos are removed from your star list and emits events for tracking.
+- **GraphQL batch queries**: backend supports batching release queries via GitHub's GraphQL API.
+- **API_SECRET auto-generation**: the server auto-generates a secure API secret on first start.
+
 ### Docker
 
 Docker is the recommended way to run the full app with the backend and persistent SQLite storage.

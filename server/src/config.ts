@@ -35,12 +35,28 @@ function resolveEncryptionKey(dataDir: string): string {
   return newKey;
 }
 
+function resolveApiSecret(dataDir: string): string | null {
+  const envSecret = process.env.API_SECRET;
+  if (envSecret) return envSecret;
+
+  const secretFilePath = path.join(dataDir, '.api-secret');
+  if (fs.existsSync(secretFilePath)) {
+    return fs.readFileSync(secretFilePath, 'utf-8').trim();
+  }
+
+  const newSecret = crypto.randomBytes(32).toString('hex');
+  fs.writeFileSync(secretFilePath, newSecret, { mode: 0o600 });
+  console.log('Generated new API_SECRET and saved to data/.api-secret');
+  console.log(`API_SECRET: ${newSecret}`);
+  return newSecret;
+}
+
 function loadConfig(): Config {
   const dataDir = resolveDataDir();
 
   return {
     port: parseInt(process.env.PORT || '3000', 10),
-    apiSecret: process.env.API_SECRET || null,
+    apiSecret: resolveApiSecret(dataDir),
     encryptionKey: resolveEncryptionKey(dataDir),
     dbPath: process.env.DB_PATH || path.join(dataDir, 'data.db'),
     nodeEnv: process.env.NODE_ENV || 'development',

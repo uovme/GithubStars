@@ -160,6 +160,12 @@ export async function syncFromBackend(): Promise<void> {
             subscribed_to_releases: local.subscribed_to_releases ?? backendRepo.subscribed_to_releases,
           };
         });
+        // Detect unstarred repos
+        const newIds = new Set(mergedRepos.map(r => r.id));
+        const removed = localRepos.filter(r => !newIds.has(r.id));
+        if (removed.length > 0) {
+          window.dispatchEvent(new CustomEvent('gsm:repos-removed', { detail: { repos: removed } }));
+        }
         state.setRepositories(mergedRepos);
         _lastHash.repos = hashes.repos;
       }
@@ -234,6 +240,7 @@ async function pushCurrentStateToBackend(): Promise<void> {
   try {
     const pushVersion = _localChangeVersion;
     const state = useAppStore.getState();
+    const updated_at = new Date().toISOString();
 
     const results = await Promise.allSettled([
       backend.syncRepositories(state.repositories),
@@ -241,6 +248,7 @@ async function pushCurrentStateToBackend(): Promise<void> {
       backend.syncAIConfigs(state.aiConfigs),
       backend.syncWebDAVConfigs(state.webdavConfigs),
       backend.syncSettings({
+        updated_at,
         activeAIConfig: state.activeAIConfig,
         activeWebDAVConfig: state.activeWebDAVConfig,
         hiddenDefaultCategoryIds: state.hiddenDefaultCategoryIds,
@@ -408,6 +416,17 @@ export function startAutoSync(): () => void {
   }, POLL_INTERVAL);
 
   console.log('🔄 Auto-sync started (push debounce: 2s, poll: 5s)');
+
+  // #1 Security: clear local token if backend has it stored
+  if (backend.isAvailable) {
+    backend.isTokenStoredOnServer().then((stored) => {
+      if (stored && useAppStore.getState().githubToken) {
+        useAppStore.getState().setGitHubToken(null);
+        console.log('🔒 Cleared local GitHub token (stored on server)');
+      }
+    }).catch(() => {/* ignore */});
+  }
+
   return unsubscribe;
 }
 
