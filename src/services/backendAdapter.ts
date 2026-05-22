@@ -9,13 +9,14 @@ class BackendAdapter {
   async init(): Promise<void> {
     try {
       // Try common backend URLs
-      const urls = [
+      const candidateUrls = [
         window.location.origin + '/api',
       ];
       // Only probe localhost in development
       if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        urls.push('http://localhost:3000/api');
+        candidateUrls.push('http://localhost:3000/api');
       }
+      const urls = Array.from(new Set(candidateUrls));
 
       for (const baseUrl of urls) {
         const controller = new AbortController();
@@ -29,8 +30,13 @@ class BackendAdapter {
             const data = await res.json();
             if (data.status === 'ok') {
               this._backendUrl = baseUrl;
-              console.log(`✅ Backend connected: ${baseUrl}`);
-              return;
+              const authOk = await this.verifyAuth();
+              if (authOk) {
+                console.log(`✅ Backend connected: ${baseUrl}`);
+                return;
+              }
+              console.warn(`⚠️ Backend found but API Secret was rejected: ${baseUrl}`);
+              this._backendUrl = null;
             }
           }
         } catch {

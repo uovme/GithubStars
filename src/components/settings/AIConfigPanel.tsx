@@ -3,6 +3,7 @@ import { Bot, Plus, Edit3, Trash2, Save, X, TestTube, RefreshCw, MessageSquare, 
 import { AIConfig, AIApiType, AIReasoningEffort } from '../../types';
 import { useAppStore } from '../../store/useAppStore';
 import { AIService } from '../../services/aiService';
+import { backend } from '../../services/backendAdapter';
 import { buildFinalApiUrl } from '../../utils/apiUrlBuilder';
 import { SliderInput } from '../ui/SliderInput';
 import { useDialog } from '../../hooks/useDialog';
@@ -118,12 +119,13 @@ export const AIConfigPanel: React.FC<AIConfigPanelProps> = ({ t }) => {
     prevApiTypeRef.current = 'openai';
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.name || !form.baseUrl || !form.apiKey || !form.model) {
       toast(t('请填写所有必填字段', 'Please fill in all required fields'), 'error');
       return;
     }
 
+    let nextConfigs = aiConfigs;
     if (editingId) {
       const existingConfig = aiConfigs.find(c => c.id === editingId);
       if (existingConfig) {
@@ -140,6 +142,9 @@ export const AIConfigPanel: React.FC<AIConfigPanelProps> = ({ t }) => {
           isActive: existingConfig.isActive,
         };
         updateAIConfig(editingId, updates);
+        nextConfigs = aiConfigs.map(config =>
+          config.id === editingId ? { ...config, ...updates } : config
+        );
       }
     } else {
       const config: AIConfig = {
@@ -156,6 +161,16 @@ export const AIConfigPanel: React.FC<AIConfigPanelProps> = ({ t }) => {
         reasoningEffort: form.reasoningEffort || undefined,
       };
       addAIConfig(config);
+      nextConfigs = [...aiConfigs, config];
+    }
+
+    if (backend.isAvailable) {
+      try {
+        await backend.syncAIConfigs(nextConfigs);
+      } catch (error) {
+        console.error('Sync AI configs after save failed:', error);
+        toast(`${t('AI配置已保存到本地，但同步到后端失败', 'AI config saved locally, but backend sync failed')}: ${(error as Error).message}`, 'error');
+      }
     }
 
     resetForm();

@@ -39,7 +39,8 @@ export const BackendPanel: React.FC<BackendPanelProps> = ({ t }) => {
       try {
         await backend.init();
         const healthData = await backend.checkHealth();
-        if (healthData) {
+        const authOk = await backend.verifyAuth();
+        if (healthData && authOk) {
           setStatus('connected');
           setHealth({ version: healthData.version, timestamp: healthData.timestamp });
         } else {
@@ -60,7 +61,7 @@ export const BackendPanel: React.FC<BackendPanelProps> = ({ t }) => {
     try {
       await backend.init();
       const healthData = await backend.checkHealth();
-      const authOk = secretInput ? await backend.verifyAuth() : true;
+      const authOk = await backend.verifyAuth();
       if (healthData && authOk) {
         setStatus('connected');
         setHealth({ version: healthData.version, timestamp: healthData.timestamp });
@@ -252,8 +253,8 @@ export const BackendPanel: React.FC<BackendPanelProps> = ({ t }) => {
         </div>
         <p className="text-xs text-gray-500 dark:text-text-tertiary mt-2">
           {t(
-            '如果后端设置了 API_SECRET 环境变量，在此输入相同的值。未设置则留空。',
-            'If the backend has API_SECRET env var set, enter the same value here. Leave empty if not set.'
+            '如果后端设置或自动生成了 API_SECRET，在此输入相同的值；未启用鉴权时留空。',
+            'If the backend has a configured or auto-generated API_SECRET, enter the same value here. Leave empty only when auth is disabled.'
           )}
         </p>
       </div>
